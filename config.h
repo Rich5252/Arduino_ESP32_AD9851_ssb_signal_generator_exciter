@@ -608,7 +608,7 @@
 #define ENV_FILTER_PNP_BC327_ATTN   1
 #define ENV_FILTER_VARIANT   ENV_FILTER_PNP_BC327_ATTN
 
-#define SAMPLE_RATE_HZ     16000u  // was 9600 (see below), then 10000 for a long stretch, now
+#define SAMPLE_RATE_HZ     20000u  // was 9600 (see below), then 10000 for a long stretch, now
                                     // raised to 16000 once the AD9851 write path (bit-bang +
                                     // fast register writes, see AD9851.c) freed up enough
                                     // real-time budget: at 10000 write_us alone was ~50-52us of
@@ -659,7 +659,13 @@
                                     // SAMPLE_RATE_HZ=16000 (64000/16000=4, vs 80000's old 5;
                                     // 2000000/16000=125 is unaffected, since gptimer's
                                     // resolution_hz doesn't depend on the ADC rate).
-#define HILBERT_TAPS       65   // was briefly tested at 129 to check whether Hilbert filter
+#define HILBERT_TAPS       129  // 2026-10-03: raised 65 -> 129 for 20 kHz Fs. The 65-tap Hamming Hilbert's
+                                 // lower band edge scales with Fs/taps, so at 20 kHz it leaks an opposite-
+                                 // sideband IMAGE of any input below ~400 Hz (calc: -25 dB at 350 Hz, -16 dB at
+                                 // 250 Hz; 129 taps: -57 / -47 dB - see sim_eer/sim_hilbert_image.py and the
+                                 // 2026-10-03 notes entries). User bench test: 129 taps removes the image.
+                                 // The FIR now uses the folded half-tap form (ssb_dsp.c), so 129 taps costs
+                                 // about half of what 65 plain taps did. Earlier note, kept below: was briefly tested at 129 to check whether Hilbert filter
                                  // approximation accuracy was the source of the IMD floor that
                                  // tracks 1:1 with signal level below -6dB - real hardware A/B
                                  // showed no significant difference, ruling that hypothesis out

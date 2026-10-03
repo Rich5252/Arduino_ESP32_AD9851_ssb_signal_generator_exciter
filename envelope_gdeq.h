@@ -549,7 +549,7 @@ typedef enum {
 // ENV_GDEQ_HAS_CANDIDATE_B's own comment above.
 #define ENV_GDEQ_HAS_A_CANDIDATE 0
 
-#if SAMPLE_RATE_HZ == 16000
+#if SAMPLE_RATE_HZ == 16000 || SAMPLE_RATE_HZ == 20000
   #if ENV_FILTER_VARIANT == ENV_FILTER_BC337
     #define ENV_GDEQ_A1  -0.023900f
     #define ENV_GDEQ_A2   0.447131f

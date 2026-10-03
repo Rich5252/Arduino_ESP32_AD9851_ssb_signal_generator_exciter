@@ -136,7 +136,7 @@
 // preference. This repo's value had been left at 80000 through that whole
 // investigation (the 64000 setting existed only as a local edit on the
 // user's board) until this commit brought the two back in sync.
-#define ADC_CONT_SAMPLE_FREQ_HZ   64000u   // within ESP32-S3's continuous-mode range
+#define ADC_CONT_SAMPLE_FREQ_HZ   40000u   // within ESP32-S3's continuous-mode range
 #define ADC_CONT_FRAME_SAMPLES    16    // DMA chunk size only now - see AVERAGING note above.
                                          // If adc_continuous_new_handle() errors on this, the
                                          // driver enforces a different frame-size constraint -

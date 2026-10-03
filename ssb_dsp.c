@@ -472,7 +472,11 @@ static inline void IRAM_ATTR squelch_update(squelch_t *s, float x)
 struct ssb_dsp_s {
     int num_taps;
     int center;                 // (num_taps - 1) / 2, also the direct-path delay
-    float *hilbert_coeffs;      // windowed ideal-Hilbert-transformer taps
+    float *hilbert_coeffs;      // windowed ideal-Hilbert-transformer taps (full set; kept for reference/tests)
+    float *hilbert_half;        // folded set: hilbert_half[j] = coeffs[center + (2j+1)], the only non-zero taps
+                                // on one side of center (the taps are exactly antisymmetric about center and
+                                // every even-offset tap is exactly 0) - see the FIR loop in ssb_dsp_process_sample
+    int hilbert_half_n;         // number of folded taps = (center + 1) / 2 (offsets k = 1, 3, 5, ... <= center)
     float *delay_line;          // circular buffer of recent audio samples
     int delay_head;             // index of most recently written sample
     float prev_phase;
@@ -643,16 +647,25 @@ esp_err_t ssb_dsp_init(const ssb_dsp_config_t *cfg, ssb_dsp_handle_t *out_handle
     h->freq_dev_slew_limit_hz = SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ;
     h->slew_limited_prev_freq_dev_hz = 0.0f;
 
+    h->hilbert_half_n = (h->center + 1) / 2;
     h->hilbert_coeffs = calloc(h->num_taps, sizeof(float));
+    h->hilbert_half = calloc(h->hilbert_half_n, sizeof(float));
     h->delay_line = calloc(h->num_taps, sizeof(float));
-    if (!h->hilbert_coeffs || !h->delay_line) {
+    if (!h->hilbert_coeffs || !h->hilbert_half || !h->delay_line) {
         free(h->hilbert_coeffs);
+        free(h->hilbert_half);
         free(h->delay_line);
         free(h);
         return ESP_ERR_NO_MEM;
     }
 
     generate_hilbert_coeffs(h->hilbert_coeffs, h->num_taps);
+    // Folded tap set for the fast FIR (2026-10-03). coeffs[center + k] for odd k > 0; the matching tap on the
+    // other side of center, coeffs[center - k], is exactly its negative (h[-k] = -h[k], symmetric window), and
+    // coeffs[center + k] for even k (including k = 0) is exactly zero.
+    for (int j = 0; j < h->hilbert_half_n; j++) {
+        h->hilbert_half[j] = h->hilbert_coeffs[h->center + (2 * j + 1)];
+    }
 
     h->master_gain_db = 0.0f;
     h->master_gain_linear = 1.0f;
@@ -1147,13 +1160,28 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
     // because they decay toward zero during silence the same way - this
     // path predates today's changes, consistent with the "very occasional,
     // pre-existing" overruns rather than something newly introduced.
+    //
+    // 2026-10-03: FOLDED FIR. The Hilbert taps are exactly antisymmetric about
+    // `center` (coeffs[center-k] = -coeffs[center+k]) and exactly zero at every even
+    // offset k (including k = 0), so the full N-tap sum
+    //     Q = sum_n coeffs[n] * x[head - n]
+    // is identical to
+    //     Q = sum_{k odd, 1..center} h_k * ( x[head-center-k] - x[head-center+k] )
+    // i.e. (center+1)/2 multiply-adds (32 for 129 taps) instead of N (129), with two
+    // wrap-checked reads per term. Same result as the old loop up to float summation
+    // order (host-checked against the full convolution, test_hilbert_fold.c).
     float Q = 0.0f;
-    int n = 0;
-    for (; n <= head; n++) {
-        Q += handle->hilbert_coeffs[n] * handle->delay_line[head - n];
-    }
-    for (; n < N; n++) {
-        Q += handle->hilbert_coeffs[n] * handle->delay_line[head - n + N];
+    {
+        const float *hh = handle->hilbert_half;
+        const float *dl = handle->delay_line;
+        const int half_n = handle->hilbert_half_n;
+        int base = i_idx;                       // head - center, already wrapped into [0, N)
+        for (int j = 0; j < half_n; j++) {
+            int k = 2 * j + 1;
+            int ia = base - k;  if (ia < 0)  ia += N;      // sample (center + k) steps old
+            int ib = base + k;  if (ib >= N) ib -= N;      // sample (center - k) steps old
+            Q += hh[j] * (dl[ia] - dl[ib]);
+        }
     }
     Q = flush_denorm(Q);
     int64_t t2 = esp_timer_get_time();
@@ -1287,6 +1315,7 @@ void ssb_dsp_deinit(ssb_dsp_handle_t handle)
 {
     if (!handle) return;
     free(handle->hilbert_coeffs);
+    free(handle->hilbert_half);
     free(handle->delay_line);
     free(handle);
 }

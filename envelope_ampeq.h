@@ -147,7 +147,7 @@
 // different filter revision (different loss shape) or Fs (different
 // Nyquist, different fraction-of-band the shelf's corner/plateau cover)
 // would be a subtle, wrong-shaped correction, not a crash.
-#if SAMPLE_RATE_HZ == 16000 && ENV_FILTER_VARIANT == ENV_FILTER_PNP_BC327_ATTN
+#if SAMPLE_RATE_HZ == 16000 || SAMPLE_RATE_HZ == 20000 && ENV_FILTER_VARIANT == ENV_FILTER_PNP_BC327_ATTN
   // Chosen 2026-09-03 by inspection against the measured insertion-loss
   // table in the header comment above - NOT a numerically-fitted
   // optimum. Response this produces (RBJ high-shelf, S=1, computed

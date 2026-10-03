@@ -677,7 +677,7 @@ void ssb_dsp_lower_freq_dev_slew_limit(ssb_dsp_handle_t handle);  // '{' - tight
  */
 typedef struct {
     uint32_t max_audio_fx_us;  ///< Compressor + 2 biquads (0 if audio_fx wasn't enabled at init).
-    uint32_t max_fir_us;       ///< Hilbert FIR convolution (num_taps multiply-adds).
+    uint32_t max_fir_us;       ///< Hilbert FIR convolution (folded: (num_taps+1)/4 multiply-adds since 2026-10-03; was num_taps).
     uint32_t max_atan2_us;     ///< atan2f() alone (instantaneous phase).
     uint32_t max_sqrt_us;      ///< sqrtf() alone (envelope magnitude).
 } ssb_dsp_profile_t;
