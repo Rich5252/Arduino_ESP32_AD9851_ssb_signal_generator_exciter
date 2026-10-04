@@ -1278,7 +1278,7 @@ void setup()
         // budget. Set .enable = false to go back to raw mic passthrough.
         .audio_fx = {
             .enable = AUDIO_FX_ENABLED,
-            .hpf_freq_hz = 300.0f,
+            .hpf_freq_hz = 350.0f,
             .presence_freq_hz = 2200.0f,
             .presence_gain_db = 4.0f,
             .presence_q = 1.0f,

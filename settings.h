@@ -329,7 +329,7 @@ SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM },
 // Preset 6 -
 { "V4 Two tone tuned", AUDIO_SRC_TWOTONE, 2.15f, 0.20f, 0.90f, false, ADC_LPF_MODE_OFF, false, false, 0.6f, true, true, 0.00f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, true, ENVELOPE_INTERP_CURVE_CATMULL_ROM },
 // Preset 7 -
-{ "TwoToneButwGD Env 1.6-2.9", AUDIO_SRC_TWOTONE, 2.96f, 0.40f, 0.46f, true, ADC_LPF_MODE_OFF, false, false, 1.0f, true, false, 0.0f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM },  // was 1.85f @ 10000Hz; adc_lpf_bypass=true
+{ "TwoTone 20kFs R-1", AUDIO_SRC_TWOTONE, 3.43f, 0.20f, 0.90f, true, ADC_LPF_MODE_OFF, false, false, 0.6f, true, true, 0.0000f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM, false, false, ENV_GDEQ_VARIANT_DEFAULT, false, false, 0.0f, 0, false, 0.0000f },
 // Preset 8 - 2026-09-25: migrated to new mic-gain/compressor-level
 // architecture per explicit user request (old master_gain_db=29.3f moved
 // out; compressor now on with mic_gain_db=7.0f, comp_level_db=6). This is
@@ -337,7 +337,7 @@ SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM },
 // preset 9 below, no independent real-voice calibration cross-check
 // applies to this one's mic_gain_db value, it's simply the user's stated
 // new setting.
-{ "Micr WhiteNoise", AUDIO_SRC_MIC, 2.68f, 0.36f, 0.48f, true, ADC_LPF_MODE_CHEBYSHEV8, true, true, 0.0f, true, true, 0.00f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM, false, false, ENV_GDEQ_VARIANT_DEFAULT, true, true, 14.0f, 6, true, 0.0160f },
+{ "Micr WhiteNoise 20k", AUDIO_SRC_MIC, 3.43f, 0.36f, 0.48f, true, ADC_LPF_MODE_CHEBYSHEV8, true, true, 0.0f, true, true, 0.00f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM, false, false, ENV_GDEQ_VARIANT_DEFAULT, true, true, 18.0f, 6, true, 0.0160f },
 // Preset 9 - 2026-09-25: migrated to new mic-gain/compressor-level
 // architecture per explicit user request (old master_gain_db=6.3f moved
 // out; compressor now on with mic_gain_db=14.0f, comp_level_db=6). Per
@@ -345,7 +345,7 @@ SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM },
 // tuning this preset carried before - NOT a re-assertion of the earlier, true, 0.0160f
 // 6.3dB/6.17dB calibration match noted 2026-09-25 (that comparison applies
 // to the OLD value this preset just moved away from, not to 14dB).
-{ "Micr Voice", AUDIO_SRC_MIC, 2.68f, 0.36f, 0.48f, true, ADC_LPF_MODE_CHEBYSHEV8, true, true, 0.0f, true, true, 0.00f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM, false, false, ENV_GDEQ_VARIANT_DEFAULT, true, true, 7.0f, 6, true, 0.0160f }
+{ "Micr Voice 20k", AUDIO_SRC_MIC, 3.43f, 0.36f, 0.48f, true, ADC_LPF_MODE_CHEBYSHEV8, true, true, 0.0f, true, true, 0.00f, SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ, false, ENVELOPE_INTERP_CURVE_CATMULL_ROM, false, false, ENV_GDEQ_VARIANT_DEFAULT, true, true, 7.0f, 6, true, 0.0160f }
 };
 
 // If this array's size ever changes, ssb_mic_test.ino's serial handler

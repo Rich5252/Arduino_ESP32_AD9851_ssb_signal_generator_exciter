@@ -209,7 +209,9 @@ void test_signals_set_twotone_dither_enabled(bool enable);
 // cause one small, one-time phase discontinuity in whichever tone(s)
 // change generator, on the tick the switch happens - same
 // accepted-as-negligible convention as 'Q's own on/off transition and a
-// 'T' band change already carry. While dither ('Q') is on, tone2 always
+// 'T' band change already carry. [2026-10-03: no longer true for 'O' - bench
+// showed the jump upsets the spectrum when cycling, so 'O' now also restarts
+// the generators and the DSP signal memory; see test_signals_twotone_request_reset().] While dither ('Q') is on, tone2 always
 // uses the accumulate path regardless of which of these three modes is
 // selected (dither's own tone2 path already used the accumulator both
 // before and after the 2026-09-17 NCO fix), so this selector then only
@@ -223,6 +225,10 @@ typedef enum {
 twotone_phase_gen_t test_signals_get_twotone_phase_gen(void);
 const char* test_signals_get_twotone_phase_gen_name(void); // current mode's name, no state change - for status/banner lines
 const char* test_signals_next_twotone_phase_gen(void);     // cycles to the next mode, returns its name
+// 2026-10-03: ask for the tone generators' indices and phases to be zeroed (consumed on the next
+// generate_twotone_sample() call). 'O' now calls this together with ssb_dsp_request_reset() so a mode switch
+// restarts cleanly instead of stepping the tone phase. Safe from any task (sets a flag only).
+void test_signals_twotone_request_reset(void);
 
 // Envelope step test ('p') - slow square wave direct to the envelope
 // output, carrier held fixed, bypassing ssb_dsp_process_sample()

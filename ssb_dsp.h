@@ -118,6 +118,14 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
                              float *out_envelope);
 
 /**
+ * @brief Ask for a clean restart of the DSP's signal memory (Hilbert delay line, phase memory, slew-limiter
+ *        memory, EQ/compressor filter state). Safe to call from any task: it only sets a flag, and the clear
+ *        itself runs at the start of the next ssb_dsp_process_sample() call. Settings and diagnostic stats are
+ *        not touched. Added 2026-10-03 for the 'O' generator-mode switch.
+ */
+void ssb_dsp_request_reset(ssb_dsp_handle_t handle);
+
+/**
  * @brief Free all buffers associated with a SSB DSP instance.
  */
 void ssb_dsp_deinit(ssb_dsp_handle_t handle);

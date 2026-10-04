@@ -4280,6 +4280,126 @@ User bench result: HILBERT_TAPS = 129 removes the −3 kHz-band image; user aske
 
 Next: after flashing, read `[timing] dsp breakdown fir=` and `max_busy_us`, and repeat the −3 kHz-band measurement; possibly re-run the 150/250/350 Hz single-tone image test to compare with the table above.
 
+### 2026-10-03 (later) — 'Noise 20kFs' worksheet, last two entries: IF gain reduced (40 dB) and the 129-tap Hilbert run
+
+User: 129 taps works well on the bench. The workbook (`421467ed-…xlsx`) adds two blocks to 'Noise 20kFs' (rows ~410 and ~465), both x2 interp + ISR, 40k ADC. The user's comments: IF gain reduced to 40 dB and the noise speaker level raised with a lower gain to avoid envelope overload; the last block is the 129-tap Hilbert ("suppress LF image").
+
+Block settings that differ (from the Response lines): block 9 (row ~412): ALC off, Soft-Limit off, mic 30 dB, delay 3.38; block 10 (row ~465, 129 taps): ALC on, Soft-Limit on, mic 28 dB, delay 3.43. The earlier x2-ISR-40k runs had ALC/Soft-Limit on, mic 36 dB. So the last two runs differ from the earlier ones in several settings at once (IF gain, speaker level, mic gain, ALC/Soft-Limit, and for the last, the Hilbert length); effects below cannot be attributed to the taps alone.
+
+Per-band levels, dB re each run's reference (lower band / upper band), 3 / 6 / 9 / 12 / 15 kHz:
+- earlier x2 ISR 40k ADC (#2): lower −29.3 / −40.6 / −47.5 / −53.2 / −55.4; upper −32.5 / −41.0 / −49.6 / −55.3 / −56.1
+- block 9 (IF 40 dB, ALC/SL off, 65 taps): lower −31.4 (the user's "best case after flattening the input") / −40.0 / −47.0 / −53.0 / −55.6; upper −33.5 / −42.2 / −49.9 / −55.3 / −56.6
+- block 10 (129 taps): lower **−33.5** / −40.8 / −47.2 / −53.7 / −56.1; upper **−34.2** / −42.7 / −50.1 / −55.4 / −56.7
+
+Readings:
+1. At the 3 kHz band the lower (image-side) level improved from −29.3 (earlier run) / −31.4 (block 9) to −33.5 dB, and the lower-vs-upper difference fell from 3.2 dB (earlier) / 2.1 dB (block 9) to 0.7 dB: the image no longer dominates that band, consistent with the 129-tap Hilbert removing the LF image. The remaining ≈−34 dB in both 3 kHz bands is something else (not identified; the SDR floor is not the limit here, headroom over the floor at 3 kHz is ≈34 dB).
+2. A lower-above-upper asymmetry persists with 129 taps at 6–12 kHz (1.9 / 2.9 / 1.7 dB at 6 / 9 / 12 kHz, versus 2.2 / 2.9 / 2.3 in block 9 and 1.5 / 4.5 in the 16k reference at 6 / 9 kHz). So that asymmetry is not the Hilbert LF edge (the calculated Hilbert image above 700 Hz is −57 dB or lower). Not explained. The envelope-vs-phase mismatch mechanism from earlier entries remains a candidate but is not tested here.
+3. Absolute levels (dBm, mean of lower/upper) at 3 / 6 / 9 / 12 / 15 kHz: earlier #2 −78.6 / −88.7 / −96.3 / −102.1 / −103.7 (floor −113.8); block 9 −80.2 / −88.8 / −96.1 / −101.9 / −103.9 (floor −114.5); block 10 −82.6 / −90.4 / −97.2 / −103.2 / −105.2 (floor −117.0). Block 10 is 2.4 dB lower at 3 kHz and 1.0–1.6 dB lower at 6–15 kHz than block 9; given the confounders above (mic gain 28 vs 30 dB, ALC/Soft-Limit state) only the 3 kHz change is plausibly (not provably) a Hilbert effect.
+4. The IF-gain change lowered the receiver floor to −117.0 dBm. Headroom of the noise bands over the floor is now 8.3 / 6.3 / 4.1 dB at 30 / 45 / 63 kHz (was 5–6 / 4–5 / 2–3 dB), so the far-offset numbers are somewhat more trustworthy than before; floor-corrected excess at 30 / 45 / 63 kHz: −109.4 / −111.8 / −115.1 dBm (block 10). A like-for-like 16 kHz run in this new setup was not made, so no 16k-versus-20k conclusion at far offsets can be drawn from these.
+
+Not provided: V timing lines for the 129-tap build (`fir=`, `max_busy_us`, wakeup jitter, overruns, FIFO drops). Those are the check for the folded-FIR CPU estimate in the previous entry. No firmware changed in this step.
+
+### 2026-10-03 (later) — V diagnostics with the 129-tap folded-FIR build (20 kHz, x2 interp + ISR, 40k ADC)
+
+Three 'V' snapshots pasted by the user (~101 s long window, ~580k ticks at the first snapshot).
+
+Readings:
+- `dsp breakdown: audio_fx=10 fir=12 atan2=8 sqrt=7` (µs, maxima since boot). Previous build (65 taps, plain loop): audio_fx=12 fir=13 atan2=8 sqrt=9. So the maximum measured FIR time did not increase with 129 taps; it is 1 µs lower. This is consistent with the estimate in the previous firmware entry (folded 129 taps no more expensive than plain 65), but it does not establish the real per-sample compute cost: these are running maxima of wall-clock time and include any ISR preemption of dsp_task (the AD9851 ISR write is ≈12 µs, plus the ADC ISR), so a ~12 µs maximum can be mostly preemption. An average or minimum FIR time was not measured.
+- `max_busy_us=40` (adc=13 dsp=23 write=21) of 50 µs, overruns=0, late_ticks_total=0, wakeup jitter max_gap 59 µs. Previous: 39 (adc 13 dsp 23 write 16). The write phase maximum rose from 16 to 21 µs; not explained (could be preemption-maximum variation or run-to-run variation, one run each). Total busy 40 µs plus up to ≈9–12 µs jitter reaches the 50 µs period if the worst cases coincide; none did in the window (coincidence probability not estimated).
+- ADC: long-window avg 40322.42 sps (+0.806 %) — again the predicted 40322.58 for interval 62; true_ratio 2.0161 / 2.0162 consistent. FIFO: min 31, max 62, **drop_total=0**, starve_ticks_total=0 (the previous 20k snapshot showed drop_total=5 since boot; with a 64-entry FIFO the maximum is still within 2 entries of full).
+- Frequency deviation: `max_unclamped=10000 Hz (limit=20000)`, `clip_count=0`; `max_freq_dev_step: 8429 Hz`. 10000 Hz equals Fs/2 at 20 kHz Fs, i.e. what a ±π sample-to-sample phase step corresponds to (my reading, from the definition of freq_dev as phase difference × Fs/2π; not checked against the code path here), so the maximum is probably the phase-wrap limit being reached near envelope nulls rather than an unclamped deviation of that size. At 16 kHz Fs the same limit would be 8 kHz. No samples reached the 20 kHz clamp.
+- `jump_log: n=580234 blended=10 either=108 (0 %)`, canaries OK, `null_bias2 weighted_bias ≈ +203 Hz` (the mic-mode value, not meaningful for the two-tone comparison).
+
+Conclusion: no evidence of a CPU or timing regression from 129 taps. Open: the average (not maximum) FIR cost, the write-phase maximum increase 16 → 21 µs, and whether FIFO drops stay at 0 over longer runs. No firmware changed in this step.
+
+### 2026-10-03 (later) — 16 kHz vs 20 kHz splatter comparison, with the user's clarifications
+
+User clarifications: the 'Noise 3k Bands' worksheet and the first entry of 'Noise 20kFs' are 16 kHz Fs (not identical settings, best achievable at the time); the SDR settings of the later 20k runs are now optimised for lower noise readings; 129 taps essentially helped only the close-in band (other differences in the last block are SDR/measurement variance); the ≈7 dB reduction at −15 kHz is important for splatter, and 20 kHz Fs is a definite win. The ISR writes were what let 20 kHz show its benefit.
+
+Comparison of the 16 kHz reference (floor −111.0 dBm, first entry) with the final 129-tap 20 kHz block (floor −117.0 dBm); per-band, lower / upper:
+- −15/+15 kHz band: relative to each run's reference −7.2 / −6.6 dB; absolute (dBm) −5.6 / −5.0 dB (−99.3 → −104.9 lower, −100.5 → −105.5 upper). The 16k reference had 10–12 dB of headroom over the receiver floor in this band, so the floor correction is ≤0.5 dB and the 5–7 dB improvement is robust to the floor change (not to other SDR/setting differences between sessions, which cannot be quantified from the data).
+- 12 kHz band: −4.1 / −4.3 dB relative, −2.4 / −2.7 dB absolute. 6 kHz: −3.1 / −3.5 relative, −1.5 / −1.9 absolute. 9 kHz: −1.6 / −0.1 relative, 0.0 / +1.6 absolute (no clear change).
+- 18 kHz band: −0.7 / −0.1 relative, but +0.9 / +1.5 dB absolute (20 kHz higher). 21 kHz band: +1.3 / +0.5 relative, +2.9 / +2.1 absolute (the 16k reference is only ≈4 dB above its floor here, floor-corrected difference +5.0 / +3.9 dB, uncertain by a couple of dB). 30 kHz: −2.1 / −2.7 relative, −0.5 / −1.1 absolute (16k headroom only ≈3 dB, unreliable).
+- Interpretation (hedged): the noise skirt of each configuration has a shoulder close to its own sample rate (16 kHz reference: a bump of ≈4–5 dB in the 15 kHz band; 20 kHz runs: only ≈1–1.5 dB in the 18 kHz band). If each band label covers [f, f+3 kHz] (not confirmed — the sheet does not say), those bands contain 16 kHz and 20 kHz respectively. So the large improvement at 15 kHz is the 16 kHz-related shoulder both shrinking and moving out, and at 18–21 kHz the 20 kHz levels are equal to or somewhat higher than the 16 kHz levels in absolute terms. The result is a clear gain at ≈12–15 kHz offsets, small gains at 3–6 kHz, no clear change at 9 kHz, and no gain (possibly a small loss of 1–3 dB, floor-limited) at 18–21 kHz.
+- Whether this counts as "less splatter" depends on which offsets matter for the intended use; the data support the 15 kHz result firmly, and do not support a broadband improvement.
+
+Caveats: runs are from different sessions with different SDR settings/gain/floor, single runs (the only repeat pair, the two identical x2-ISR-40k runs, differed by ≤0.7 dB); settings other than Fs differ between the 16k reference and the 20k runs (mic gain, delay, ALC/soft-limit, Hilbert taps for the last block). Nothing changed in firmware in this step.
+
+### 2026-10-03 (later) — Longer V diagnostics run, 129-tap folded-FIR build at 20 kHz (≈19 minutes, ≈6.6 million ticks)
+
+Seven 'V' snapshots over a ≈1148 s window (the `[adc]`/`[dsp]` long-window lines say 1140.9–1148.1 s; `jump_log n` grew to 6,594,997 ticks).
+
+- Timing: `max_busy_us` 40 for most of the run, 42 in the last two snapshots (adc=14 dsp=23 write=21), `period_us=50`, `overruns=0`, `late_ticks_total=0`, wakeup jitter `max_gap_us` 59 → 61 µs. The change from 40 to 42 coincides with snapshots where `busy breakdown cmd=` was 4.0 % (the V command handling itself), so it is plausibly command-handling load, not steady-state load; not proven. `dsp breakdown: audio_fx=10 fir=12 atan2=8 sqrt=7` unchanged from the earlier 129-tap snapshot.
+- Zero overruns and zero late ticks over ≈6.6 million ticks at 20 kHz with a 50 µs period and ≈39–42 µs worst-case busy time. The earlier concern (worst-case busy + worst-case jitter ≈ the period) did not materialise in this run; it is an observation of a single ≈19-minute run, not a guarantee.
+- ADC/FIFO: long-window ADC average 40322.54–40322.58 sps (0.806 %), exactly the divider prediction for interval 62 (40322.58); `true_ratio` 2.0161; FIFO `min=30 max=62`, `starve_ticks_total=0`, **`drop_total=0`** over the whole window (the 5 drops seen in an earlier shorter run did not recur); `pool_ovf_total=0`. Instantaneous `[adc] actual=` readings over ~0.2–6.5 s windows scatter between 40225 and 40659 sps (short-window measurement noise from 16-sample bursts); the long-window value is the one to trust.
+- Freq-dev: `max_unclamped=10000 Hz` (the ±π step value at 20 kHz), `clip_count=0`; `max_freq_dev_step` 9727 Hz (earlier snapshot 8429 Hz) — a larger step than before within a longer run, presumably the same near-null phase jumps, not explained further. `jump_log: blended=23 either=762` out of 6.59 M ticks (0.012 %).
+- Canaries OK throughout; `skip_total` (diagnostic lines dropped by TX-buffer guards) rose to 113, which only affects the printed diagnostics.
+
+Conclusion: the 129-tap folded-FIR build at 20 kHz Fs shows no CPU/timing problems over ≈19 minutes. Open as before: average (not maximum) FIR cost; the cause of the 16 → 21 µs write-phase maximum. No firmware changed in this step.
+
+### 2026-10-03 (later) — Scope observation: AD9851 write ISR start jitter ≈12 µs pk, end tighter (ISR duration varies); hypotheses from code reading, no new measurement
+
+User observation (scope, 20 kHz build, x2 interp + ISR writes): the start of the AD9851 write ISR shows ≈12 µs pk jitter, the end is tighter, so the ISR duration varies; the user asked whether a late start might get more priority.
+
+Code facts relevant to it (read, not measured):
+- The gptimer alarm ISR runs on Core 1 at `intr_priority = 3` (`init_sample_timer()`), fixed per source: lateness does not change priority. Interrupts at levels ≤3 can be held off on Core 1 by critical sections (portENTER_CRITICAL masks up to the syscall level) and same-priority ISRs do not nest; the earlier jitter hunt showed the ADC conv-done ISR could delay it before priority 3 was set (config comment in `init_sample_timer`).
+- Sequence on a full tick (ISR_NOTIFY_BEFORE_AD9851_ENABLED = 1, `ssb_mic_test.ino` ~330–480): pin-5 falling edge (entry) → `envelope_output_isr_fasttick_step()` (LEDC write) → staleness bookkeeping/snapshot → `vTaskNotifyGiveFromISR(dsp_task)` (Core 0 wake) → AD9851 bit-bang (prep ≈2 µs + toggle loop ≈10 µs) → pin-5 rising edge. At x2 interp the fast tick is 25 µs and a full-tick ISR body is ≈15–20 µs.
+- The bit-bang loop's per-bit edge delays are disabled (`AD9851_BITBANG_EDGE_DELAY_ENABLED 0`), so its duration is set by CPU instruction and GPIO-register (peripheral-bus) latency; only the FQ_UD edge has a cycle-counter delay (`AD9851_FQUD_EDGE_DELAY_ENABLED 1`).
+- The comment on `ISR_NOTIFY_BEFORE_AD9851_ENABLED` (config.h) already lists, as an unmeasured risk, both cores now touching the GPIO/LEDC peripheral bus at the same time (Core 0's dsp_task tail phase writing PWM while Core 1 bit-bangs), which could stretch the ISR.
+
+Candidate explanations (none tested):
+1. Start jitter from `vTaskNotifyGiveFromISR` before the write: it takes the FreeRTOS kernel spinlock shared with Core 0 and triggers a cross-core wake, so waiting for Core 0 (or for a Core 0 tick/scheduler critical section) delays the write start by a variable amount. Predicts that with the order reversed (`ISR_NOTIFY_BEFORE_AD9851_ENABLED 0`) the write start becomes fixed relative to pin-5 entry.
+2. Shorter duration when starting late: if the delay comes from Core 0 activity that also contends the peripheral bus, a late start tends to find the bus quieter, so the bit-bang toggles run faster; a normally-timed start overlaps Core 0's PWM write and is slower. This would also fit the dsp_task `write=` maximum rising from 16 to 21 µs. Predicts duration correlates inversely with start delay.
+3. Entry latency from interrupts being held off on Core 1 (critical sections, Serial/USB activity) would shift both start and end equally, so by itself it does not explain the end being tighter than the start.
+4. A measurement-reference effect (which edge the scope is triggered on) cannot be excluded without knowing the trigger source.
+"Late start gets more priority" is not a mechanism that exists here (static priority); the evidence above does not choose between 1 and 2.
+
+Suggested checks (not done): (a) scope with trigger on the pin-5 entry edge and the probes on W_CLK/FQ_UD, comparing the notify-first and write-first orders; (b) add integer cycle-counter stamps in the ISR (entry, after envelope step, after notify, after write) with min/max accumulators printed in 'V' (the ISR duration is currently not measured; the V `write=` figure is dsp_task's tail phase, not the ISR). Not implemented; would be a firmware change, needs the user's go-ahead. No firmware changed in this step.
+
+### 2026-10-03 (later still) — Write-ISR duration variation measured on scope at ≈4.5 µs pk (user); follow-up reasoning, no new test
+
+User: cannot get to the AD9851 right now, agrees the notify/bus-contention explanations look likely; scope shows the ISR duration varies by about 4.5 µs pk (start-edge jitter reported earlier ≈12 µs pk).
+
+What this does and does not show:
+- Range arithmetic only: end = start + duration, so pk-pk(end) ≥ pk-pk(start) − pk-pk(duration) ≈ 12 − 4.5 = 7.5 µs. A 4.5 µs duration spread can therefore only partly compensate a 12 µs start spread; "end tighter than start" is consistent with that, but the end cannot be tight to better than ~7.5 µs unless the 12 µs figure refers to a different edge/reference than the end measurement (not established which edge the scope triggers on).
+- The sign of the start/duration correlation (late start → shorter ISR) is the user's observation, not yet quantified. Candidates 1 and 2 above (notify/kernel-spinlock wait; peripheral-bus contention with Core 0's tail-phase PWM write) remain untested.
+- Cache misses on project code look unlikely as the cause: `on_timer_alarm`, `ad9851_set_frequency`, the fast GPIO helpers and `envelope_output_isr_fasttick_step` are IRAM_ATTR (grep). Whether `vTaskNotifyGiveFromISR` and the FreeRTOS spinlock path it calls execute from IRAM in this build config was not checked.
+- A ~4.5 µs spread on a ~12–15 µs ISR body is large for bus contention alone (unverified judgement); a variable wait inside the notify call would fit better, but that is a guess.
+- Cheapest discriminating firmware experiment (not done, needs go-ahead): flip `ISR_NOTIFY_BEFORE_AD9851_ENABLED` to 0 and re-scope. If duration spread drops and write-start becomes fixed relative to entry, the notify call is the source (at the cost of the earlier timing benefit the flag was introduced for, which needs re-checking in V). The cycle-counter stamp option also remains open.
+No firmware changed in this step.
+
+### 2026-10-03 (later still) — Write-ISR duration re-read as ≈13.5–19 µs (≈5.5 µs pk-pk); no harm seen so far, two-tone not yet checked with these settings
+
+User (scope): ISR duration spread is a little larger than first reported, about 13.5 to 19 µs; no visible harm so far (noise result unchanged), but two-tone has not been looked at with the latest settings (129 taps, 20 kHz Fs, ISR writes, interp ISR).
+
+Notes / what this does and does not show:
+- Updates the earlier ≈4.5 µs figure to ≈5.5 µs pk-pk (13.5–19 µs). The range-arithmetic bound becomes pk-pk(end) ≥ 12 − 5.5 ≈ 6.5 µs if the 12 µs start jitter refers to the same trigger reference (still unconfirmed).
+- At x2 interpolation the fast tick period is 25 µs, so a 19 µs full-tick ISR leaves ≈6 µs of slack before the next alarm at worst; this is a margin statement from the numbers only. Core 1 collision with the ADC ISR at the same time was not re-measured, and V shows overruns 0 / drop_total 0 over ~19 min, which is what supports "no harm" so far.
+- The no-harm observation rests on the noise-floor/V results, which are not sensitive to small phase-path timing jitter. A write-start jitter of several µs moves the instant the AD9851 frequency word is committed relative to the envelope update; the earlier EER model found IMD sensitive to path delay alignment, but it modelled a fixed delay, not jitter, so the effect of this jitter on IMD is not quantified. The two-tone IMD and ladder measurement with these settings is the direct check; not yet run.
+- Still open: whether notify-first is the source (flag flip test), cycle-counter stamps (needs go-ahead). No firmware changed.
+
+### 2026-10-03 (later still) — Firmware: 'O' (two-tone generator mode) now restarts the generators and the DSP signal memory; found MOD160 invalid at 20 kHz Fs
+
+Bench (user): two-tone is reasonably well behaved; LEGACY generator works best; cycling through 'O' can jump the carrier frequency and upsets the spectrum; asked for a reset of the DSP and the generator on each mode change.
+
+Change made (uncompiled for the ESP32; host syntax-checked with stubs only):
+- `ssb_dsp.c/.h`: new `ssb_dsp_request_reset(handle)` sets a flag; the clear runs at the top of the next `ssb_dsp_process_sample()` (dsp_task), so it cannot race the FIR. It zeroes the Hilbert delay line and head, `have_prev_phase`/`prev_phase` (so the first dphi after a switch is not taken against a stale phase), the slew-limiter memory, the EQ biquad states and `comp.env`. Settings, gains, enables and the diagnostic accumulators are not touched.
+- `test_signals.cpp/.h`: new `test_signals_twotone_request_reset()`; consumed at the top of `generate_twotone_sample()`; zeroes both wrapping indices and both phases, so EXACT/LEGACY/MOD160 all start on the identical waveform (host-checked: first two samples 0 and 0.40074 in every mode). Dither state is left alone.
+- `serial_commands.cpp` 'O' handler calls both after cycling the mode; the reply line now says "(generator + DSP restarted)".
+- Not reset: envelope-path state downstream of the DSP (gdeq/ampeq/ALC/soft-limit IIR states, relative-delay and interpolator buffers); these carry a short transient (assumed small, not measured). Diagnostics ('r') are not cleared, so press 'r' after switching before reading null-bias/freq-dev stats.
+- The restart itself makes the DSP output a start-up ramp (Hilbert delay line refills over ~center = 64 samples at 129 taps, about 3 ms at 20 kHz). Whether that transient is quieter on the spectrum than the old step is untested.
+
+Host results (test_twotone_gen.cpp, not a hardware result):
+- At 16 kHz (current config.h) all three generators follow the ideal two-tone after a reset (max error ≤1.4e-4).
+- At 20 kHz, EXACT and LEGACY follow the ideal, but MOD160 departs from it at sample 160 (max error 1.7). Cause: `TWOTONE_MOD160_PERIOD_SAMPLES` is hard-coded to 160, which is Fs/gcd = 16000/100 only at 16 kHz; at 20 kHz the true period is 200 samples, so MOD160 wraps the phase mid-cycle every 160 samples (700 Hz: 5.6 cycles per 160 samples, a 0.6-cycle phase step). This is a likely contributor to "cycling jumps the carrier / upsets the spectrum" at 20 kHz, and the reset above does not fix it (it is a periodic discontinuity inside that mode). The header comment already warns the modulus is only valid for the current 100 Hz-GCD structure; the Fs dependence was not called out. Possible fix, not applied (needs go-ahead): period = SAMPLE_RATE_HZ/100u for the 100 Hz-GCD presets.
+- Separate, from the header's own earlier simulation (not re-measured here): LEGACY accumulates a growing float error (about ±2e-4 Hz over 500 s ≈ 0.6 rad), so switching LEGACY→EXACT/MOD160 after a long run does give a real phase step; the reset covers that case.
+- A host "max |fdev| after switch" comparison with/without reset was inconclusive: two-tone near-null jumps up to ~8 kHz occur in steady state anyway, which swamps the metric. No hardware test of the reset has been done.
+
+### 2026-10-03 (later still) — Arduino build error: host test programs moved out of the sketch folder
+
+User's ESP32 build failed at link: "multiple definition of `main'" between `test_twotone_gen.cpp` and `test_hilbert_fold.c` (both copied into the sketch folder). Cause: my host test programs sat in the repo root next to the firmware sources, and the Arduino IDE compiles every .c/.cpp in the sketch folder. My mistake; the same applied to `test_hilbert_fold.c` (added with the 129-tap change) and `sim_legacy_null_walk.c`, which also has a main().
+Fix: all three moved to `host_tests/` (not compiled by the IDE) with a README; build comment in `test_twotone_gen.cpp` updated for the new relative paths. Earlier note entries that mention these files by bare name now refer to `host_tests/<name>`. User needs to delete `test_twotone_gen.cpp` and `test_hilbert_fold.c` (and `sim_legacy_null_walk.c` if present) from the sketch folder. No firmware source changed in this step; the 'O' reset firmware itself has still not been reported compiled.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

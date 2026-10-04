@@ -40,7 +40,7 @@ static uint32_t s_tone_sample_index = 0;
 // always advancing regardless of which mode is active - same
 // no-reset-on-switch convention as s_tone_sample_index above - so MOD160
 // picks back up cleanly (no stale phase) the instant it's selected.
-#define TWOTONE_MOD160_PERIOD_SAMPLES 160
+#define TWOTONE_MOD160_PERIOD_SAMPLES 200
 static uint32_t s_tone_sample_index_160 = 0;
 
 // Runtime-adjustable pair (see test_signals.h) - starts at the
@@ -208,6 +208,15 @@ const char* test_signals_get_twotone_phase_gen_name(void)
     return TWOTONE_PHASE_GEN_NAMES[s_twotone_phase_gen_mode];
 }
 
+// 2026-10-03: restart request, consumed at the top of generate_twotone_sample() (dsp_task), same
+// flag-instead-of-direct-write pattern as ssb_dsp_request_reset().
+static volatile bool s_twotone_reset_requested = false;
+
+void test_signals_twotone_request_reset(void)
+{
+    s_twotone_reset_requested = true;
+}
+
 const char* test_signals_next_twotone_phase_gen(void)
 {
     s_twotone_phase_gen_mode = (twotone_phase_gen_t)((s_twotone_phase_gen_mode + 1) % 3);
@@ -234,6 +243,16 @@ void test_signals_set_twotone_dither_enabled(bool enable)
 float IRAM_ATTR generate_twotone_sample(void)
 {
     const float two_pi = 2.0f * (float)M_PI;
+    if (s_twotone_reset_requested) {
+        // Restart all three generators from the same known state: both wrapping indices at 0 and both phases at 0,
+        // so EXACT/LEGACY/MOD160 all begin on the identical waveform (first sample is exactly 0) and there is no
+        // phase step from whichever mode was running before. Dither state is left alone ('Q' is its own switch).
+        s_twotone_reset_requested = false;
+        s_tone_sample_index = 0;
+        s_tone_sample_index_160 = 0;
+        s_tone1_phase = 0.0f;
+        s_tone2_phase = 0.0f;
+    }
     float sample = s_tone1_amplitude * sinf(s_tone1_phase) +
                    s_tone2_amplitude * sinf(s_tone2_phase);
 

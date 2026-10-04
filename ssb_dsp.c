@@ -481,6 +481,9 @@ struct ssb_dsp_s {
     int delay_head;             // index of most recently written sample
     float prev_phase;
     bool have_prev_phase;
+    // 2026-10-03: set from the serial context by ssb_dsp_request_reset(), consumed (and cleared) at the top of
+    // ssb_dsp_process_sample() on the dsp_task side, so the state clear never races the FIR that reads it.
+    volatile bool reset_requested;
     float sample_rate_hz;
     float max_freq_dev_hz;
 
@@ -1037,6 +1040,28 @@ static inline float wrap_pi(float x)
     return x;
 }
 
+void ssb_dsp_request_reset(ssb_dsp_handle_t handle)
+{
+    if (handle) handle->reset_requested = true;
+}
+
+// Runs inside ssb_dsp_process_sample() (dsp_task context) when ssb_dsp_request_reset() was called. Clears every
+// piece of signal memory that would otherwise carry the PREVIOUS source/generator mode's waveform into the next
+// one: the Hilbert delay line, the phase-difference memory (without this, the first dphi after a switch is taken
+// against a stale prev_phase, i.e. a one-sample frequency spike), the slew-limiter memory, and the EQ/compressor
+// filter state. Config (gains, enables, thresholds, coefficients) and the diagnostic accumulators are untouched.
+static void ssb_dsp_do_reset(ssb_dsp_handle_t handle)
+{
+    memset(handle->delay_line, 0, (size_t)handle->num_taps * sizeof(float));
+    handle->delay_head = 0;
+    handle->have_prev_phase = false;
+    handle->prev_phase = 0.0f;
+    handle->slew_limited_prev_freq_dev_hz = 0.0f;
+    handle->eq_hpf.x1 = handle->eq_hpf.x2 = handle->eq_hpf.y1 = handle->eq_hpf.y2 = 0.0f;
+    handle->eq_presence.x1 = handle->eq_presence.x2 = handle->eq_presence.y1 = handle->eq_presence.y2 = 0.0f;
+    handle->comp.env = 0.0f;
+}
+
 void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
                              float audio_sample,
                              ssb_sideband_t sideband,
@@ -1044,6 +1069,11 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
                              float *out_envelope)
 {
     int N = handle->num_taps;
+
+    if (handle->reset_requested) {
+        handle->reset_requested = false;
+        ssb_dsp_do_reset(handle);
+    }
 
     // 2026-09-25: Mic Gain - unconditional, applied BEFORE compressor/EQ,
     // works even with audio_fx_configured false (raw passthrough), same

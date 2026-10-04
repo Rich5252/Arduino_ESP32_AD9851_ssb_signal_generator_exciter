@@ -422,10 +422,15 @@ void handle_serial_commands(void)
             // convention as 'T'/'R'/'Q'.
             bool was_twotone_o = (src == AUDIO_SRC_TWOTONE);
             const char *gen_name = test_signals_next_twotone_phase_gen();
+            // 2026-10-03 (user request after bench use): cycling modes could jump the carrier frequency and
+            // upset the spectrum - restart the tone generators and the DSP's signal memory with every switch.
+            // Both are flag requests consumed in dsp_task, so no race with the per-sample code.
+            ssb_dsp_request_reset(dsp_state_get_ssb());
+            test_signals_twotone_request_reset();
             if (!was_twotone_o) {
                 dsp_state_set_audio_source(AUDIO_SRC_TWOTONE);
             }
-            serial_reply("-> two-tone phase generator: %s%s%s\r\n",
+            serial_reply("-> two-tone phase generator: %s (generator + DSP restarted)%s%s\r\n",
                           gen_name,
                           test_signals_get_twotone_dither_enabled() ? " ('Q' dither is ON, so tone2 is "
                                           "unaffected by this selector either way)" : "",
