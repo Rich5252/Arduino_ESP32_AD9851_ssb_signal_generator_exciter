@@ -890,14 +890,16 @@ static void IRAM_ATTR dsp_task(void* arg)
             // returns the latest value in ADC-code units - see
             // adc_capture.h for the full FIFO/filtering design.
             float filtered = adc_capture_read_next_sample();
-            // {A} ADC-output meter tap (instrumentation.h): +/-1.0 = the two ADC rails, before DC removal and
-            // before the digital mic gain. Returns at once unless the ADC meter point is selected ('#').
-            instrumentation_record_adc(filtered / 2048.0f - 1.0f);
             int raw = (int)filtered;
             // Normalize 12-bit ADC (0-4095) to roughly [-1, 1] with DC removal.
             sample = (float)raw / 2048.0f - 1.0f;
             dc_estimate = dc_alpha * dc_estimate + (1.0f - dc_alpha) * sample;
             sample -= dc_estimate;
+            // {A} ADC-output meter tap (instrumentation.h): the AC signal after DC removal, +/-1.0 = half the ADC
+            // code range about the DC level. Taken here (not before the DC blocker) because the DC level itself is
+            // not trusted/accurate; the cost is that the headroom lost to a bias offset is not reported. Before
+            // the digital mic gain. Returns at once unless the ADC meter point is selected ('#').
+            instrumentation_record_adc(sample);
 #else
             // ADC_CAPTURE_ENABLED=0 (config.h isolation test) - the driver
             // was never started, so there's no FIFO to read from. Silence,

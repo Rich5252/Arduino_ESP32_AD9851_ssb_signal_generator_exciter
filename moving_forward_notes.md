@@ -4457,6 +4457,22 @@ User: wanted the ADC output as a second meter point so mic level can be set to a
 - Host check (`host_tests/test_level_meter.cpp`): ADC 0.5 → {A-06.0}; code-0 rail sample → {A-00.0}; 1.05 → {A+00.4}; envelope calls ignored in ADC mode (floor); ADC calls ignored in RF mode; off prints nothing. Two failures on the first run were my own test errors (a wrong rail value fed, which then carried into the next interval's start level).
 - Not run on the ESP32 or against the plugin.
 
+### 2026-10-04 (later still) — Q: how does the ADC {A} reading deal with DC? (code reading, nothing changed)
+
+- The ADC tap is `filtered/2048 − 1`, taken before the DC blocker (`dc_estimate`, `ssb_mic_test.ino`) and before mic gain. It is measured against nominal mid-scale (code 2048), not against the actual DC level, and the follower takes |x|, so any DC offset is included in the reading.
+- Effect: with signal bias above mid-scale the positive peaks read larger than the signal alone, so the meter reaches 0 dB when the side nearer a rail hits it, which is the clipping case it is meant to catch; the side with more headroom is not reported. With no signal the meter shows the DC offset itself (e.g. a bias at code 2150 would read about −26 dB) rather than −99.9.
+- So the number is "worst-side distance to the rails", not the AC level of the audio. Not known: the real bias of this input (`dc_estimate` is not printed anywhere), which sets how much headroom is lost on one side.
+- Options if wanted (not done): AC-only reading taken after DC removal (shows signal level, hides the lost headroom), or reporting both together (e.g. a second field for the DC offset). Pending user's preference.
+
+### 2026-10-04 (later still) — ADC {A} meter now reads the AC signal after DC removal (user decision)
+
+User: the DC level is not accurately known, so it must be rejected before the level is reported; losing the offset-headroom information is acceptable. Changed (uncompiled for the ESP32; syntax-checked on the host):
+- `ssb_mic_test.ino`: the ADC tap moved from `filtered/2048 − 1` (before the DC blocker) to the `sample` value right after `sample -= dc_estimate;`, still before the digital mic gain. `instrumentation_record_adc()` itself is unchanged.
+- Meaning of the reading now: 0 dB = the AC peak equals half the ADC code range about the DC level. With a DC offset the ADC clips below 0 dB on the side nearer a rail, and that lost headroom is not shown (accepted). A sudden DC step reads as a brief transient while the blocker re-settles. The blocker is a one-pole estimator with a time constant of 19.95 ms (`DC_BLOCK_TIME_CONSTANT_S`), i.e. a corner near 8 Hz; content below that is rejected together with DC.
+- Idle reading is now the AC noise level, not the DC offset. Docs updated (`instrumentation.h`, `config.h` comment, command reference, '#' mode name).
+- The host test (`host_tests/test_level_meter.cpp`) was not changed because the meter code is the same; its "rail" wording refers to a ±1.0 input, not to the tap.
+- Still true: the ESP32 ADC front end may saturate or go nonlinear before the code rails (not checked); not run on the ESP32 or against the plugin.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

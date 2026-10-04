@@ -24,7 +24,7 @@ static const float s_decay_coef = powf(10.0f, -INSTRUMENTATION_LEVEL_DECAY_DB_PE
 
 static inline void IRAM_ATTR meter_feed(meter_t *m, float x)
 {
-    float a = fabsf(x);                            // gdeq/ampeq can undershoot slightly negative; ADC swings both ways
+    float a = fabsf(x);                            // gdeq/ampeq can undershoot slightly negative; ADC signal swings both ways
     float e = m->level * s_decay_coef;
     if (a > e) e = a;
     if (e < 1e-6f) e = 0.0f;                       // keep the decaying value out of denormals
@@ -70,7 +70,7 @@ const char* instrumentation_mode_name(int mode)
 {
     switch (mode) {
         case INSTR_RF:  return "RF envelope (0 dB = 1.0 at the predistort input)";
-        case INSTR_ADC: return "ADC output (0 dB = ADC full scale, both rails)";
+        case INSTR_ADC: return "ADC output, DC removed (0 dB = AC peak of half the ADC range)";
         default:        return "off";
     }
 }

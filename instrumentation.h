@@ -21,10 +21,12 @@
  *   (duty = env*0.9+0.2) already clamps at an envelope of about 0.89 (-1 dB), so overdrive can start slightly
  *   below the 0 dB mark in that case.
  * The same {A} field carries whichever meter point is selected; there is no marker in the line saying which.
- *   ADC mode: 0 dB = an ADC rail (code 0 or 4095 against mid-scale 2048), so a reading at 0 dB means the ADC output
- *   is hitting its range limit, which the digital mic gain ('U'/'Y') cannot change - it sits after this point.
- *   The ESP32 ADC front end may saturate or turn nonlinear before the code rails (not checked here), so trouble
- *   can start a little below 0 dB.
+ *   ADC mode: the AC signal at the ADC output after DC removal, before the digital mic gain ('U'/'Y', which
+ *   therefore cannot change it). 0 dB = the AC peak equals half the ADC code range, i.e. the ADC would clip at
+ *   exactly that level if the DC level sat exactly at mid-scale. The DC level is deliberately rejected (it is not
+ *   accurately known), so headroom lost to a bias offset is NOT shown: with an offset the ADC clips below 0 dB on
+ *   the side nearer a rail. The ESP32 ADC front end may also saturate or go nonlinear before the code rails
+ *   (not checked here). The DC blocker tracks slowly, so a sudden DC step reads as a brief transient.
  * More fields can be appended to the same line later.
  *
  * Off at boot unless INSTRUMENTATION_DEFAULT_MODE (config.h) says otherwise; '#' cycles off -> RF -> ADC -> off at run time. Called from
@@ -37,8 +39,9 @@ enum { INSTR_OFF = 0, INSTR_RF = 1, INSTR_ADC = 2 };
 // Real-time side, called once per full dsp_task tick. Cheap: only the selected mode's meter does any work (one
 // fabsf, one multiply, two compares); the other call returns after one compare. Never touches Serial.
 //   RF : the envelope at the RF meter point (see above).
-//   ADC: the ADC output, normalised so +/-1.0 = the two ADC rails (code/2048 - 1, taken BEFORE DC removal and before
-//        the digital mic gain), mic path only; with another audio source nothing is fed and {A} reads the floor.
+//   ADC: the ADC output AFTER DC removal (dsp_task's DC blocker) and before the digital mic gain, normalised so
+//        +/-1.0 = half the ADC code range about the DC level; mic path only, with another audio source nothing is
+//        fed and {A} reads the floor.
 void IRAM_ATTR instrumentation_record_envelope(float envelope);
 void IRAM_ATTR instrumentation_record_adc(float adc_norm);
 

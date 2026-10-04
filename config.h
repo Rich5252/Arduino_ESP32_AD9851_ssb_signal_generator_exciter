@@ -719,7 +719,8 @@
 // ---- Instrumentation stream (2026-10-04), see instrumentation.h ----
 // Machine-readable "{X<value>}" fields for the SDR plugin, same style as the TXlink Nano's {F}{R}{S}{T}.
 // Only {A} exists so far: a peak level meter whose meter point is chosen at run time with '#':
-// off -> RF envelope (0 dB = 1.0 before the predistort step) -> ADC output (0 dB = ADC rails) -> off.
+// off -> RF envelope (0 dB = 1.0 before the predistort step) -> ADC output, DC removed (0 dB = AC peak of half
+// the ADC range) -> off.
 // Boot state below: 0 = off (keeps bench serial logs clean), 1 = RF envelope, 2 = ADC output.
 #define INSTRUMENTATION_DEFAULT_MODE    0
 #define INSTRUMENTATION_PERIOD_MS       250      // 4 messages per second
