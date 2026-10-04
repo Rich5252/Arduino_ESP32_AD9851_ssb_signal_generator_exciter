@@ -137,6 +137,7 @@
 #include "envelope_interp.h"
 #include "diagnostics.h"
 #include "serial_commands.h"
+#include "instrumentation.h"
 
 // (No TAG/ESP_LOG here - everything in this file uses Serial.printf so it's
 // visible regardless of the IDE's Core Debug Level setting. ssb_dsp.c has
@@ -889,6 +890,9 @@ static void IRAM_ATTR dsp_task(void* arg)
             // returns the latest value in ADC-code units - see
             // adc_capture.h for the full FIFO/filtering design.
             float filtered = adc_capture_read_next_sample();
+            // {A} ADC-output meter tap (instrumentation.h): +/-1.0 = the two ADC rails, before DC removal and
+            // before the digital mic gain. Returns at once unless the ADC meter point is selected ('#').
+            instrumentation_record_adc(filtered / 2048.0f - 1.0f);
             int raw = (int)filtered;
             // Normalize 12-bit ADC (0-4095) to roughly [-1, 1] with DC removal.
             sample = (float)raw / 2048.0f - 1.0f;
@@ -969,6 +973,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // as gdeq/ampeq above): each function itself no-ops when disabled.
         envelope = envelope_alc_process(envelope);
         envelope = envelope_softlimit_process(envelope);
+        // {A} RF-envelope level meter tap (instrumentation.h): last point before predistort/PWM mapping, so 0 dB = 1.0
+        // at the predistort LUT input. One fabsf + multiply + compares; no Serial on this path.
+        instrumentation_record_envelope(envelope);
 
         // envelope is roughly [0,1] for typical mic levels but not
         // rigorously bounded - clamp before handing off either way.
@@ -1598,6 +1605,7 @@ void loop()
     // This task is lower priority than both real-time tasks, so it never
     // competes with either for CPU time or bus access.
     diagnostics_service();
+    instrumentation_service();   // {A..} line for the SDR plugin when enabled ('#'), see instrumentation.h
     int64_t t_diag1 = esp_timer_get_time();
 
     // delay(10) below used to go completely unmeasured - it's loop()'s

@@ -716,6 +716,17 @@
                                   // across its whole normalized range, same as real two-tone peaks
                                   // routinely reach in practice
 
+// ---- Instrumentation stream (2026-10-04), see instrumentation.h ----
+// Machine-readable "{X<value>}" fields for the SDR plugin, same style as the TXlink Nano's {F}{R}{S}{T}.
+// Only {A} exists so far: a peak level meter whose meter point is chosen at run time with '#':
+// off -> RF envelope (0 dB = 1.0 before the predistort step) -> ADC output (0 dB = ADC rails) -> off.
+// Boot state below: 0 = off (keeps bench serial logs clean), 1 = RF envelope, 2 = ADC output.
+#define INSTRUMENTATION_DEFAULT_MODE    0
+#define INSTRUMENTATION_PERIOD_MS       250      // 4 messages per second
+// {A} meter ballistics: instant attack, then falls at this rate. 15 dB/s takes 0 dB to -30 dB in 2 s. Reasoned
+// starting value, not a tuned one.
+#define INSTRUMENTATION_LEVEL_DECAY_DB_PER_S 15.0f
+
 // Worst-case timing diagnostics period, shared by diagnostics.cpp - one
 // sample period in microseconds.
 #define SSB_SAMPLE_PERIOD_US (1000000UL / SAMPLE_RATE_HZ)

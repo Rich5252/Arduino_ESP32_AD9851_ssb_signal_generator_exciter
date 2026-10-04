@@ -18,6 +18,7 @@
 #include "settings.h"
 #include "ssb_dsp.h"
 #include "test_signals.h"
+#include "instrumentation.h"
 #if AD9851_ATTACHED
 #include "relative_delay.h"
 #include "carrier_output.h"
@@ -405,6 +406,13 @@ void handle_serial_commands(void)
                           dither_now_on ? "ON" : "off", (double)TWOTONE_DITHER_MAX_HZ,
                           (double)(1000.0f / TWOTONE_DITHER_UPDATE_HZ),
                           was_twotone_q ? "" : ", two-tone mode enabled");
+        } else if (c == '#') {
+            // 2026-10-04: instrumentation stream meter point, cycles off -> RF envelope -> ADC output -> off -
+            // see instrumentation.h. The reply text deliberately contains no {X..} field, so a plugin parser
+            // ignores it.
+            const char *mode_name = instrumentation_cycle_mode();
+            serial_reply("-> instrumentation stream (field A): %s%s\r\n", mode_name,
+                          instrumentation_get_mode() == INSTR_OFF ? "" : " - one line every 250ms");
         } else if (c == 'O') {
             // Two-tone phase generator selector - see test_signals.h's doc
             // comment for the full rationale. Added 2026-09-17 as a plain
