@@ -19,6 +19,7 @@
 #include "ssb_dsp.h"
 #include "test_signals.h"
 #include "instrumentation.h"
+#include "brace_input.h"
 #if AD9851_ATTACHED
 #include "relative_delay.h"
 #include "carrier_output.h"
@@ -237,8 +238,92 @@ static void duty_override_write_and_reply(void)
 #endif
 }
 
+// ---- {X<argument>} brace commands (2026-10-12), see brace_input.h ----
+// The brace characters are reserved for this syntax (the freq_dev slew-limit keys that used to be '{' and '}' are
+// now '_' and '='). Replies deliberately contain no brace characters, so a plugin watching the port for {X..}
+// fields never mistakes a reply for data.
+static void brace_run_command(const brace_cmd_t *cmd)
+{
+    switch (cmd->letter) {
+        case 'F': {
+#if AD9851_ATTACHED
+            // {F<Hz>}: set the carrier (nominal) frequency; the fixed calibration offset is added on top
+            // (programmed with exactly the number sent; the clock calibration is separate, see {C}).
+            // {F} with no number just reports the current setting.
+            if (cmd->arg[0] == 0) {
+                serial_reply("-> carrier is %u Hz (clock calibration %d ppb, set with C)\r\n",
+                              (unsigned)carrier_output_get_freq_hz(), (int)carrier_output_get_cal_ppb());
+                break;
+            }
+            uint32_t hz;
+            if (!brace_parse_uint(cmd->arg, &hz)) {
+                serial_reply("-> frequency command not understood (digits only, Hz, 9 digits max). Received: command letter '%c', "
+                              "argument '%s'\r\n", cmd->letter, cmd->arg);
+            } else if (!carrier_output_set_freq_hz(hz)) {
+                serial_reply("-> frequency %u Hz out of range (%u..%u Hz) - unchanged at %u Hz\r\n",
+                              (unsigned)hz, (unsigned)CARRIER_MIN_HZ, (unsigned)CARRIER_MAX_HZ,
+                              (unsigned)carrier_output_get_freq_hz());
+            } else {
+                serial_reply("-> carrier set to %u Hz (clock calibration %d ppb)\r\n",
+                              (unsigned)carrier_output_get_freq_hz(), (int)carrier_output_get_cal_ppb());
+            }
+#else
+            serial_reply("-> frequency command ignored: no AD9851 attached in this build (AD9851_ATTACHED 0)\r\n");
+#endif
+            break;
+        }
+        case 'C': {
+#if AD9851_ATTACHED
+            // {C<ppb>}: AD9851 clock calibration in parts per billion, same convention as the Nano library's
+            // setClock(): positive = real clock slower than assumed = output goes up. {C} alone reports it.
+            // New value = old + (f_set - f_measured) / f_set * 1e9. Takes effect on the next tick; not saved.
+            if (cmd->arg[0] == 0) {
+                serial_reply("-> clock calibration is %d ppb (allowed +/-%d)\r\n",
+                              (int)carrier_output_get_cal_ppb(), (int)AD9851_CLOCK_CAL_PPB_MAX);
+                break;
+            }
+            int32_t ppb;
+            if (!brace_parse_int(cmd->arg, &ppb)) {
+                serial_reply("-> calibration command not understood (integer ppb, optional sign, 9 digits max). Received: "
+                              "command letter '%c', argument '%s'\r\n", cmd->letter, cmd->arg);
+            } else if (!carrier_output_set_cal_ppb(ppb)) {
+                serial_reply("-> calibration %d ppb rejected (allowed +/-%d) - unchanged at %d ppb\r\n",
+                              (int)ppb, (int)AD9851_CLOCK_CAL_PPB_MAX, (int)carrier_output_get_cal_ppb());
+            } else {
+                serial_reply("-> clock calibration set to %d ppb (carrier %u Hz)\r\n",
+                              (int)carrier_output_get_cal_ppb(), (unsigned)carrier_output_get_freq_hz());
+            }
+#else
+            serial_reply("-> calibration command ignored: no AD9851 attached in this build (AD9851_ATTACHED 0)\r\n");
+#endif
+            break;
+        }
+        default:
+            serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb)\r\n", cmd->letter);
+            break;
+    }
+}
+
+// Returns true if the character was consumed by the brace parser (do not treat it as a single-key command).
+static bool brace_handle_char(char c)
+{
+    brace_cmd_t cmd;
+    switch (brace_input_feed(c, millis(), &cmd)) {
+        case BRACE_PASS:      return false;
+        case BRACE_CONSUMED:  return true;
+        case BRACE_COMMAND:   brace_run_command(&cmd); return true;
+        case BRACE_CANCELLED: serial_reply("-> brace input cancelled, single-key commands resumed\r\n"); return true;
+        case BRACE_OVERFLOW:  serial_reply("-> brace input too long (max %d characters after the letter) - discarded\r\n",
+                                            BRACE_ARG_MAX); return true;
+    }
+    return true;
+}
+
 void handle_serial_commands(void)
 {
+    if (brace_input_check_timeout(millis())) {
+        serial_reply("-> brace input timed out - discarded, single-key commands resumed\r\n");
+    }
     // Runtime source switch: 't' -> two-tone, 's' -> single-tone, 'm' ->
     // live mic, 'p'/'y'/'h' -> isolation tests. dsp_task reads the audio
     // source fresh every tick, so this takes effect on the very next
@@ -247,6 +332,7 @@ void handle_serial_commands(void)
     // echoed as an error.
     while (Serial.available()) {
         char c = Serial.read();
+        if (brace_handle_char(c)) continue;   // inside / part of a {X..} command - never a single-key command
         audio_source_t src = dsp_state_get_audio_source();
 
         if (c == 't' && src != AUDIO_SRC_TWOTONE) {
@@ -774,7 +860,8 @@ void handle_serial_commands(void)
             envelope_floor_lower();
             serial_reply("-> envelope-null floor lowered to %.4f (see envelope_floor.h)\r\n",
                           envelope_floor_get());
-        } else if (c == '}') {
+        } else if (c == '=') {
+            // 2026-10-12: was '}' - the brace characters are now reserved for the {X..} command syntax (brace_input.h).
             ssb_dsp_raise_freq_dev_slew_limit(dsp_state_get_ssb());
             float limit = ssb_dsp_get_freq_dev_slew_limit_hz(dsp_state_get_ssb());
             if (limit >= SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ) {
@@ -782,7 +869,8 @@ void handle_serial_commands(void)
             } else {
                 serial_reply("-> freq_dev slew-rate limit loosened to %.0fHz/sample (see ssb_dsp.h)\r\n", limit);
             }
-        } else if (c == '{') {
+        } else if (c == '_') {
+            // 2026-10-12: was '{' - see '=' just above.
             ssb_dsp_lower_freq_dev_slew_limit(dsp_state_get_ssb());
             float limit = ssb_dsp_get_freq_dev_slew_limit_hz(dsp_state_get_ssb());
             serial_reply("-> freq_dev slew-rate limit tightened to %.0fHz/sample (see ssb_dsp.h)\r\n", limit);

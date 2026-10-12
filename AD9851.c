@@ -146,6 +146,12 @@ struct ad9851_s {
     // would mean.
     uint64_t ftw_reciprocal_known_good;
 
+    // 2026-10-12: clock calibration in parts per billion, same convention as the Nano library's
+    // setClock(calibration): calibrated_clock = effective_ref * (1e9 - cal_ppb) / 1e9. Positive = the real
+    // clock runs SLOW so the FTW must be larger; negative = the real clock runs fast. See
+    // ad9851_set_clock_cal_ppb() (AD9851.h).
+    int32_t clock_cal_ppb;
+
     // Written from a different context (e.g. a serial command handler)
     // than the real-time path that reads it in ad9851_set_frequency() -
     // volatile for the same reason as the other cross-context flags
@@ -287,6 +293,7 @@ esp_err_t ad9851_init(const ad9851_config_t *cfg, ad9851_handle_t *out_handle)
     }
     h->ftw_reciprocal = (1ULL << AD9851_FTW_RECIP_SHIFT) / effective_ref_hz_init;
     h->ftw_reciprocal_known_good = h->ftw_reciprocal;   // shadow copy - see ad9851_get_canary()
+    h->clock_cal_ppb = 0;
 
 #if AD9851_USE_BITBANG
     // 2026-09-10: derive the bit-bang edge-settle delay from cfg->spi_clock_hz
@@ -646,6 +653,41 @@ void ad9851_get_profile(ad9851_handle_t handle, ad9851_profile_t *out)
     if (!handle || !out) return;
     out->max_prep_us = handle->max_prep_us;
     out->max_spi_us = handle->max_spi_us;
+}
+
+// 2026-10-12: runtime clock calibration, ported from the Nano library's setClock() (cjheath AD9851.h, as used
+// in TXlink4_Nano): the calibration is a PROPORTIONAL correction of the DDS clock (ppb), not a fixed Hz offset,
+// so it is right on every band once measured on one.
+//   calibrated_clock = effective_ref * (1e9 - cal_ppb) / 1e9
+//   ftw_reciprocal   = 2^56 / calibrated_clock          (same reciprocal technique as ad9851_init())
+// Both reciprocals (the live one and its canary shadow copy) must be updated together. Concurrency: the live
+// ad9851_set_frequency() path (possibly an ISR) reads ftw_reciprocal as a 64-bit value but it is only ever
+// written here, and at the supported clocks the value is below 2^32 (2^56/180e6 is about 4.0e8), so the upper
+// word never changes and the single 32-bit store of the lower word is atomic: the reader sees the old or the new
+// value, never a mix. The range check below enforces that (new and current value both < 2^32). The shadow copy is
+// written first so a canary compare between the two stores can only see a one-tick mismatch the other way round;
+// that is a (very short) known window, see the 2026-10-12 notes entry.
+bool ad9851_set_clock_cal_ppb(ad9851_handle_t handle, int32_t cal_ppb)
+{
+    if (!handle) return false;
+    if (cal_ppb < AD9851_CLOCK_CAL_PPB_MIN || cal_ppb > AD9851_CLOCK_CAL_PPB_MAX) return false;
+
+    uint64_t effective_ref = (uint64_t)handle->ref_clk_hz * (handle->use_6x_multiplier ? 6u : 1u);
+    if (effective_ref == 0) return false;
+    uint64_t calibrated_clock = effective_ref * (uint64_t)(1000000000LL - (int64_t)cal_ppb) / 1000000000ULL;
+    if (calibrated_clock == 0) return false;
+    uint64_t recip = (1ULL << AD9851_FTW_RECIP_SHIFT) / calibrated_clock;
+    if (recip > 0xFFFFFFFFULL || handle->ftw_reciprocal > 0xFFFFFFFFULL) return false;   // keep the 32-bit-atomic update valid
+
+    handle->clock_cal_ppb = cal_ppb;
+    handle->ftw_reciprocal_known_good = recip;      // shadow first
+    handle->ftw_reciprocal = recip;                 // then the live value ad9851_set_frequency() reads
+    return true;
+}
+
+int32_t ad9851_get_clock_cal_ppb(ad9851_handle_t handle)
+{
+    return handle ? handle->clock_cal_ppb : 0;
 }
 
 void ad9851_get_canary(ad9851_handle_t handle, ad9851_canary_t *out)

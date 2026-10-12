@@ -142,7 +142,7 @@ const char* test_signals_next_tone_ratio(void);
 // the fast_atan2/fast_sqrt computation) is very unlikely to be the right
 // fix for the underlying problem, because it only redistributes the
 // error rather than reducing it. The existing freq_dev slew-rate limiter
-// (ssb_dsp_set_freq_dev_slew_limit_hz(), '{'/'}', off by default) directly
+// (ssb_dsp_set_freq_dev_slew_limit_hz(), '_'/'=', off by default) directly
 // caps the SIZE of each sample-to-sample freq_dev jump instead, and its
 // own doc comment already notes its starting value is "comfortably below
 // a null event's ~8000Hz/sample, so it actually engages only where

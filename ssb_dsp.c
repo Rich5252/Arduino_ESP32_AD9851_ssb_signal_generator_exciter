@@ -963,7 +963,7 @@ float IRAM_ATTR ssb_dsp_get_null_bias_threshold(ssb_dsp_handle_t handle)
     return handle ? handle->null_bias_threshold : 0.05f;
 }
 
-// Step size and bounds for '{'/'}' - see ssb_dsp.h's doc comment. Step
+// Step size and bounds for '_'/'=' - see ssb_dsp.h's doc comment. Step
 // chosen well above the ~60Hz/sample worst-case seen on real (non-null)
 // two-tone content, so every step in the useful range stays meaningfully
 // coarser than that floor. MIN sits comfortably above that same ~60Hz/
@@ -977,7 +977,7 @@ float IRAM_ATTR ssb_dsp_get_null_bias_threshold(ssb_dsp_handle_t handle)
 #define FREQ_DEV_SLEW_STEP_HZ        250.0f
 #define FREQ_DEV_SLEW_MIN_HZ         100.0f
 #define FREQ_DEV_SLEW_MAX_FINITE_HZ 8000.0f
-// First value dialed in when going from off -> on via '{' - comfortably
+// First value dialed in when going from off -> on via '_' - comfortably
 // above real content's own worst-case slew, comfortably below a null
 // event's ~8000Hz/sample, so it actually engages only where intended.
 #define FREQ_DEV_SLEW_START_HZ      2000.0f

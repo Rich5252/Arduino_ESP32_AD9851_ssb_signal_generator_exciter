@@ -7,7 +7,8 @@
 #if AD9851_ATTACHED
 
 static ad9851_handle_t s_ad9851;
-static volatile uint32_t s_carrier_hz = CARRIER_HZ;
+static volatile uint32_t s_carrier_hz = CARRIER_NOMINAL_HZ;          // what goes to the chip (before deviation)
+static volatile uint32_t s_carrier_hz_inv = ~(uint32_t)CARRIER_NOMINAL_HZ;   // bitwise complement, canary shadow copy
 
 void carrier_output_init(void)
 {
@@ -54,6 +55,7 @@ void carrier_output_init(void)
         .spi_clock_hz = 4000000,
     };
     ESP_ERROR_CHECK(ad9851_init(&ad_cfg, &s_ad9851));
+    ESP_ERROR_CHECK(ad9851_set_clock_cal_ppb(s_ad9851, CARRIER_CAL_PPB) ? ESP_OK : ESP_ERR_INVALID_ARG);
     ad9851_set_frequency(s_ad9851, s_carrier_hz);
 }
 
@@ -103,6 +105,36 @@ void carrier_output_get_profile(ad9851_profile_t *out)
 uint32_t carrier_output_get_carrier_hz(void)
 {
     return s_carrier_hz;
+}
+
+uint32_t carrier_output_get_carrier_hz_expected(void)
+{
+    return ~s_carrier_hz_inv;
+}
+
+bool carrier_output_set_freq_hz(uint32_t nominal_hz)
+{
+    if (nominal_hz < CARRIER_MIN_HZ || nominal_hz > CARRIER_MAX_HZ) return false;
+    // Shadow first, then the value dsp_task reads: a canary check (Core 1, same context as this call) never sees
+    // a half-updated pair, and dsp_task only ever reads s_carrier_hz.
+    s_carrier_hz_inv = ~nominal_hz;
+    s_carrier_hz = nominal_hz;
+    return true;
+}
+
+uint32_t carrier_output_get_freq_hz(void)
+{
+    return s_carrier_hz;
+}
+
+bool carrier_output_set_cal_ppb(int32_t cal_ppb)
+{
+    return ad9851_set_clock_cal_ppb(s_ad9851, cal_ppb);
+}
+
+int32_t carrier_output_get_cal_ppb(void)
+{
+    return ad9851_get_clock_cal_ppb(s_ad9851);
 }
 
 void carrier_output_get_canary(ad9851_canary_t *out)

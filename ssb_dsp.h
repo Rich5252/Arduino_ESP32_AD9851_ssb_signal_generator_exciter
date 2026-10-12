@@ -667,9 +667,9 @@ float IRAM_ATTR ssb_dsp_get_null_bias_threshold(ssb_dsp_handle_t handle);
 
 void IRAM_ATTR ssb_dsp_set_freq_dev_slew_limit_hz(ssb_dsp_handle_t handle, float limit_hz);
 float ssb_dsp_get_freq_dev_slew_limit_hz(ssb_dsp_handle_t handle);
-void ssb_dsp_raise_freq_dev_slew_limit(ssb_dsp_handle_t handle);  // '}' - loosen (snaps to fully off
+void ssb_dsp_raise_freq_dev_slew_limit(ssb_dsp_handle_t handle);  // '=' - loosen (snaps to fully off
                                                                     // past the practical ceiling)
-void ssb_dsp_lower_freq_dev_slew_limit(ssb_dsp_handle_t handle);  // '{' - tighten (snaps to a sane
+void ssb_dsp_lower_freq_dev_slew_limit(ssb_dsp_handle_t handle);  // '_' - tighten (snaps to a sane
                                                                     // starting point when coming from off)
 
 /**

@@ -183,7 +183,7 @@
  * convention already used elsewhere in this codebase for single-word
  * cross-task flags (envelope_gdeq/predistort's own enabled bools).
  *
- * Off by default (same convention as 'g'/'D'/'x'/'z'/'{'/'}') so existing
+ * Off by default (same convention as 'g'/'D'/'x'/'z'/'_'/'=') so existing
  * tuning isn't disturbed until deliberately opted into. Toggle via 'I'.
  * On an off->on transition, the ramp's prev/target are both seeded to the
  * last submitted value and marked already-arrived, so enabling never

@@ -2263,9 +2263,9 @@ static void print_null_bias_block(void)
 // single 62.5us tick, so a wrong value that PERSISTS rather than
 // self-correcting on the next tick can only mean one of these two got
 // corrupted (RAM bit flip from ESD/RF pickup, or a stray write from an
-// unrelated bug elsewhere). carrier_hz is checked against the compile-time
-// CARRIER_HZ constant itself (immune to RAM corruption); ftw_reciprocal is
-// checked against an independent shadow copy taken once at init (see
+// unrelated bug elsewhere). carrier_hz is checked against the shadow copy
+// carrier_output_get_carrier_hz_expected() (it was the compile-time CARRIER_HZ until {F} made the carrier
+// changeable at run time); ftw_reciprocal is checked against an independent shadow copy taken once at init (see
 // ad9851_get_canary()'s doc comment, AD9851.h, for why that's not a
 // perfect guarantee but still strong evidence). Deliberately called from
 // the SAME ungated (mute-exempt) 1000ms timer as print_null_bias_block() -
@@ -2295,11 +2295,12 @@ static void print_null_bias_block(void)
 static void canary_check_background(void)
 {
     uint32_t carrier_hz_now = carrier_output_get_carrier_hz();
-    if (carrier_hz_now != CARRIER_HZ && s_dbg_canary_carrier_bad_since_ms == 0) {
+    uint32_t carrier_hz_expected = carrier_output_get_carrier_hz_expected();   // follows legitimate {F} changes
+    if (carrier_hz_now != carrier_hz_expected && s_dbg_canary_carrier_bad_since_ms == 0) {
         s_dbg_canary_carrier_bad_since_ms = millis();
         if (diag_room_for(130)) {
-            Serial.printf("[canary] carrier_hz=%u (boot=%u) MISMATCH! first seen at t=%ums\r\n",
-                          carrier_hz_now, CARRIER_HZ, s_dbg_canary_carrier_bad_since_ms);
+            Serial.printf("[canary] carrier_hz=%u (expected=%u) MISMATCH! first seen at t=%ums\r\n",
+                          carrier_hz_now, carrier_hz_expected, s_dbg_canary_carrier_bad_since_ms);
         }
     }
 
@@ -2382,11 +2383,12 @@ static void canary_check_background(void)
 static void canary_print_status(void)
 {
     uint32_t carrier_hz_now = carrier_output_get_carrier_hz();
-    if (carrier_hz_now == CARRIER_HZ) {
-        Serial.printf("[canary] carrier_hz=%u (boot=%u) OK\r\n", carrier_hz_now, CARRIER_HZ);
+    uint32_t carrier_hz_expected = carrier_output_get_carrier_hz_expected();   // follows legitimate {F} changes
+    if (carrier_hz_now == carrier_hz_expected) {
+        Serial.printf("[canary] carrier_hz=%u (expected=%u) OK\r\n", carrier_hz_now, carrier_hz_expected);
     } else {
-        Serial.printf("[canary] carrier_hz=%u (boot=%u) MISMATCH! first seen at t=%ums\r\n",
-                      carrier_hz_now, CARRIER_HZ, s_dbg_canary_carrier_bad_since_ms);
+        Serial.printf("[canary] carrier_hz=%u (expected=%u) MISMATCH! first seen at t=%ums\r\n",
+                      carrier_hz_now, carrier_hz_expected, s_dbg_canary_carrier_bad_since_ms);
     }
 
     ad9851_canary_t ad_canary;

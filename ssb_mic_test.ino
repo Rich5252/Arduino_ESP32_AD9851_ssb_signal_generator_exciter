@@ -1490,6 +1490,15 @@ void setup()
                   relative_delay_get_samples(), relative_delay_get_samples() * 1000000.0f / SAMPLE_RATE_HZ,
                   DELAY_STEP_SAMPLES, DELAY_FINE_STEP_SAMPLES);
 #endif
+#if AD9851_ATTACHED
+    Serial.printf("Brace commands (character at a time, no CR/LF needed): send {F<Hz>} to set the carrier "
+                  "frequency, e.g. {F14200000} (now %u Hz, range %u..%u Hz); {C<ppb>} sets the AD9851 clock "
+                  "calibration in parts per billion, e.g. {C11408} (now %d ppb; positive raises the output; "
+                  "new = old + (f_set - f_measured)/f_set*1e9); {F} or {C} alone report. '{' starts a command and "
+                  "discards any partial one, '}' ends it and resumes the normal single-key commands.\r\n",
+                  (unsigned)carrier_output_get_freq_hz(), (unsigned)CARRIER_MIN_HZ, (unsigned)CARRIER_MAX_HZ,
+                  (int)carrier_output_get_cal_ppb());
+#endif
     Serial.printf("Send 'u'/'j' for PWM duty range offset, 'i'/'k' for span "
                   "(currently %.0f%%-%.0f%%, offset=%.2f scale=%.2f, %.0f%%/step).\r\n",
                   envelope_output_get_pwm_offset() * 100.0f,
@@ -1543,11 +1552,11 @@ void setup()
     {
         float slew = ssb_dsp_get_freq_dev_slew_limit_hz(dsp_state_get_ssb());
         if (slew >= SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ) {
-            Serial.println("Send '{'/'}' to tighten/loosen the freq_dev slew-rate limit (currently off) - "
+            Serial.println("Send '_'/'=' to tighten/loosen the freq_dev slew-rate limit (currently off) - "
                           "smooths only the sharp per-sample frequency swing at a two-tone envelope "
                           "null (ordinary content never approaches it), leaving normal audio untouched.");
         } else {
-            Serial.printf("Send '{'/'}' to tighten/loosen the freq_dev slew-rate limit (currently "
+            Serial.printf("Send '_'/'=' to tighten/loosen the freq_dev slew-rate limit (currently "
                           "%.0fHz/sample) - smooths only the sharp per-sample frequency swing at a "
                           "two-tone envelope null (ordinary content never approaches it), leaving "
                           "normal audio untouched.\r\n", slew);

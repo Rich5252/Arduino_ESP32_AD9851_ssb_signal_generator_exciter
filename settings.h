@@ -112,7 +112,7 @@ typedef struct
     // env_floor were: every existing preset's POSITIONAL initializer list
     // below still lines up unchanged, only this one new trailing value
     // needed adding to each.
-    float freq_dev_slew_limit_hz; // '{'/'}' - freq_dev slew-rate limit, Hz/sample (ssb_dsp.h);
+    float freq_dev_slew_limit_hz; // '_'/'=' - freq_dev slew-rate limit, Hz/sample (ssb_dsp.h);
                                    // SSB_DSP_FREQ_DEV_SLEW_UNLIMITED_HZ = off
 
     // Added when this lever was introduced (envelope output interpolation,

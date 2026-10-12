@@ -184,6 +184,22 @@ typedef struct {
     uint64_t ftw_reciprocal_known_good;
 } ad9851_canary_t;
 
+/**
+ * @brief (2026-10-12) Clock calibration in parts per billion, ported from the Nano library's setClock():
+ *        calibrated_clock = effective_ref * (1e9 - cal_ppb) / 1e9, and the Hz-to-FTW reciprocal is rebuilt
+ *        from it. Convention (same as the Nano library): a POSITIVE value means the real DDS clock runs slower
+ *        than assumed, so the chip is programmed with a larger FTW and the output goes UP; negative the other
+ *        way. If the output is measured low by (f_set - f_meas) Hz at f_set, increase the value by
+ *        (f_set - f_meas) / f_set * 1e9. Proportional, so one measurement fixes every band.
+ *        Takes effect on the next ad9851_set_frequency() call. Updates the canary shadow copy too. Returns
+ *        false (nothing changed) if outside +/-AD9851_CLOCK_CAL_PPB_MAX or if the new reciprocal would not fit
+ *        the atomic 32-bit update (see the definition). Default after ad9851_init() is 0.
+ */
+#define AD9851_CLOCK_CAL_PPB_MAX   200000
+#define AD9851_CLOCK_CAL_PPB_MIN   (-AD9851_CLOCK_CAL_PPB_MAX)
+bool ad9851_set_clock_cal_ppb(ad9851_handle_t handle, int32_t cal_ppb);
+int32_t ad9851_get_clock_cal_ppb(ad9851_handle_t handle);
+
 void ad9851_get_canary(ad9851_handle_t handle, ad9851_canary_t *out);
 
 /**
