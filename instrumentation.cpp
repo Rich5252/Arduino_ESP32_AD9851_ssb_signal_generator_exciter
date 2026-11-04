@@ -1,8 +1,10 @@
 #include "instrumentation.h"
 #include "config.h"
+#include "slow_adc.h"
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static volatile int s_mode = INSTRUMENTATION_DEFAULT_MODE;   // INSTR_OFF / INSTR_RF / INSTR_ADC
 static uint32_t s_last_ms = 0;
@@ -105,13 +107,21 @@ void instrumentation_format_level(char *buf, unsigned buf_len, float level_db)
 void instrumentation_service(void)
 {
     int mode = s_mode;
-    if (mode == INSTR_OFF) return;
+    bool slow = slow_adc_report_enabled();          // 2026-11-04: {F}{R}{S}{T} slow ADC fields, see slow_adc.h
+    if (mode == INSTR_OFF && !slow) return;
     uint32_t now = millis();
     if ((uint32_t)(now - s_last_ms) < (uint32_t)INSTRUMENTATION_PERIOD_MS) return;
     s_last_ms = now;
 
-    char buf[16];
-    instrumentation_format_level(buf, sizeof buf, take_level_db(mode == INSTR_ADC ? &s_adc_meter : &s_rf_meter));
-    Serial.print(buf);
+    char buf[72];
+    int n = 0;
+    if (mode != INSTR_OFF) {
+        instrumentation_format_level(buf, sizeof buf, take_level_db(mode == INSTR_ADC ? &s_adc_meter : &s_rf_meter));
+        n = (int)strlen(buf);
+    }
+    if (slow) n += slow_adc_format_report(buf + n, sizeof buf - (size_t)n);
+    if (n == 0) return;                             // slow ADC has no first average yet and {A} is off
+    buf[n] = 0;
+    Serial.print(buf);                              // same two-write pattern as before (the {A}-only line is unchanged)
     Serial.print("\r\n");
 }

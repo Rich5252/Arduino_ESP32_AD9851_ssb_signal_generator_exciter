@@ -138,6 +138,7 @@
 #include "diagnostics.h"
 #include "serial_commands.h"
 #include "instrumentation.h"
+#include "slow_adc.h"
 
 // (No TAG/ESP_LOG here - everything in this file uses Serial.printf so it's
 // visible regardless of the IDE's Core Debug Level setting. ssb_dsp.c has
@@ -1412,6 +1413,7 @@ void setup()
     // for the full wakeup-jitter investigation this was chasing.
     init_sample_timer();
     diagnostics_init();
+    slow_adc_init();             // 2026-11-04 slow ADC channels (FWD/REV/TEMP), see slow_adc.h; stub when SLOW_ADC_ENABLED 0
 
     Serial.printf("SSB mic test running: taps=%d fs=%uHz mode=%s ad9851=%s dac=MCP4725@0x%02X pwm_compare=%s\r\n",
              HILBERT_TAPS, SAMPLE_RATE_HZ,

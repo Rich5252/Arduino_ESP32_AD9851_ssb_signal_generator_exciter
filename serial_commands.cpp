@@ -20,6 +20,7 @@
 #include "test_signals.h"
 #include "instrumentation.h"
 #include "brace_input.h"
+#include "slow_adc.h"
 #if AD9851_ATTACHED
 #include "relative_delay.h"
 #include "carrier_output.h"
@@ -298,8 +299,30 @@ static void brace_run_command(const brace_cmd_t *cmd)
 #endif
             break;
         }
+        case 'K': {
+            // 2026-11-04 {K}: slow ADC channels (slow_adc.h). {K} = status (per channel, converted values, ADC2 read
+            // time; resets the max), {K0}/{K1} = stop/start appending {F}{R}{S}{T} to the instrumentation line, {K2}/{K3} = pause/run
+            // the reads themselves.
+            // Letter chosen because the Nano TXlink protocol does not use K. Replies contain no {X..} field.
+            if (cmd->arg[0] == 0) {
+                char st[480];
+                slow_adc_format_status(st, sizeof st);
+                serial_reply("-> slow ADC status:\r\n%s", st);
+            } else if ((cmd->arg[0] == '0' || cmd->arg[0] == '1') && cmd->arg[1] == 0) {
+                slow_adc_set_report_enabled(cmd->arg[0] == '1');
+                serial_reply("-> slow ADC report (fields F R S T) %s\r\n", slow_adc_report_enabled() ? "ON" : "OFF");
+            } else if ((cmd->arg[0] == '2' || cmd->arg[0] == '3') && cmd->arg[1] == 0) {
+                // 2026-11-04 {K2}/{K3}: pause/resume the ADC2 reads themselves, for A/B spectrum tests without a rebuild.
+                slow_adc_set_reads_enabled(cmd->arg[0] == '3');
+                serial_reply("-> slow ADC reads %s\r\n", slow_adc_reads_enabled() ? "RUNNING" : "PAUSED (task blocked, no ADC access, no F R S T fields)");
+            } else {
+                serial_reply("-> slow ADC command not understood (K, K0/K1 report off/on, K2/K3 reads pause/run). Received argument '%s'\r\n", cmd->arg);
+            }
+            break;
+        }
         default:
-            serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb)\r\n", cmd->letter);
+            serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run)\r\n", cmd->letter);
             break;
     }
 }

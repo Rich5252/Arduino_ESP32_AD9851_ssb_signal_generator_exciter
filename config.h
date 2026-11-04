@@ -728,6 +728,43 @@
 // starting value, not a tuned one.
 #define INSTRUMENTATION_LEVEL_DECAY_DB_PER_S 15.0f
 
+// ---- Slow ADC channels (2026-11-04, Phase 2 step 1), see slow_adc.h ----
+// Forward power, reflected power and PA temperature from the TXlink Nano, appended as {F..}{R..}{S..}{T..} to the
+// instrumentation line above (same INSTRUMENTATION_PERIOD_MS cadence, no extra serial traffic of its own).
+// UNCOMPILED / UNTESTED ON HARDWARE as written.
+#define SLOW_ADC_ENABLED          1      // 0 = module compiled to stubs, firmware behaves exactly as before
+// GPIO per channel. -1 = DUMMY (synthetic value below, no ADC access at all). Only ADC2 pins are accepted
+// (GPIO11-20; 11/12 are the AD9851, 19/20 are USB); an ADC1 pin is refused at boot because ADC1 streams the mic.
+// 2026-11-04: user's board exposes GPIO14-16 for these. GPIO13 avoided on purpose: the mic ADC driver's activity
+// was scoped coupling 5 kHz pulses onto that pad (2026-09-02, see ADC_CAPTURE_ENABLED). GPIO15/16 are also the
+// S3's 32 kHz crystal pins, only a conflict if the module fits that crystal.
+#define SLOW_ADC_FWD_GPIO         14     // ADC2 ch3
+#define SLOW_ADC_REV_GPIO         15     // ADC2 ch4
+#define SLOW_ADC_TEMP_GPIO        16     // ADC2 ch5
+// Pin voltages used for dummy channels: ~1.8 W forward (swings +/-10 % over 8 s), ~0.08 W reflected (SWR ~1.5),
+// 25 degC with the NTC values below.
+#define SLOW_ADC_DUMMY_FWD_MV     300.0f
+#define SLOW_ADC_DUMMY_REV_MV     60.0f
+#define SLOW_ADC_DUMMY_TEMP_MV    1634.0f
+// Read all three channels back to back every BURST_PERIOD, average AVG_BURSTS bursts (125 ms x 2 = 250 ms = one
+// report). 8 bursts/s = 24 reads/s; the Nano requirement is >= 2 samples/s per channel.
+#define SLOW_ADC_BURST_PERIOD_MS  125
+#define SLOW_ADC_AVG_BURSTS       2
+// Core for the reading task. A real ADC2 read masks interrupts on its own core for the conversion (IDF source,
+// see slow_adc.h): core 1 = delays the gptimer/ADC ISRs, core 0 = delays dsp_task. Pick by A/B test.
+#define SLOW_ADC_TASK_CORE        0
+#define SLOW_ADC_TASK_PRIORITY    1      // lowest useful priority (idle is 0)
+#define SLOW_ADC_REPORT_DEFAULT   1      // {F}{R}{S}{T} sent at boot; {K0}/{K1} switch it at run time
+#define SLOW_ADC_READS_DEFAULT    1      // reads running at boot; {K2} pauses, {K3} resumes
+// Conversion (slow_adc_conv.h): Nano curves, pin volts x scale = the volts the Nano would have seen. PLACEHOLDERS -
+// the detector curves need re-measuring on the new hardware.
+#define SLOW_ADC_FWD_SCALE        1.0f
+#define SLOW_ADC_REV_SCALE        1.0f
+#define SLOW_ADC_NTC_SUPPLY_V     3.3f   // NTC to ground, pull-up to this rail
+#define SLOW_ADC_NTC_PULLUP_OHM   51000.0f
+#define SLOW_ADC_NTC_R0_OHM       50000.0f
+#define SLOW_ADC_NTC_BETA         3950.0f
+
 // Worst-case timing diagnostics period, shared by diagnostics.cpp - one
 // sample period in microseconds.
 #define SSB_SAMPLE_PERIOD_US (1000000UL / SAMPLE_RATE_HZ)
