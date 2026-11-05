@@ -1811,6 +1811,9 @@ static uint32_t s_last_samples_total = 0;
 static uint32_t s_last_callback_count = 0;
 static uint32_t s_last_rate_print_ms = 0;
 
+uint32_t diagnostics_get_late_tick_count(void) { return s_dbg_late_tick_count; }
+uint32_t diagnostics_get_stale_commit_count(void) { return s_dbg_isr_stale_commit_count; }
+
 void diagnostics_reset(void)
 {
     // 2026-09-30: also clear the ISR-interp staging-error statistics (see

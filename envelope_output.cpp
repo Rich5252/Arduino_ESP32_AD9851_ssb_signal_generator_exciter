@@ -43,6 +43,7 @@ static QueueHandle_t s_envelope_queue;   // length 1, "latest value wins" (xQueu
 static TaskHandle_t s_dac_task;
 static volatile uint16_t s_dbg_dac_code = 0;
 
+#if MCP4725_I2C_ENABLED   // 2026-11-05: I2C/DAC code only built when the MCP4725 is wanted (config.h); GPIO47/48 freed
 // MCP4725 "Fast Write Command" - 2 data bytes after the address, updates
 // the DAC register immediately, does NOT touch EEPROM (EEPROM writes take
 // 25-50ms - never do that on this path). Byte layout:
@@ -103,6 +104,7 @@ static void init_i2c_dac(void)
     i2c_param_config(MCP4725_I2C_PORT, &conf);
     i2c_driver_install(MCP4725_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
 }
+#endif  // MCP4725_I2C_ENABLED
 
 #if SDM_COMPARISON_ENABLED
 static sdm_channel_handle_t s_sdm_chan = NULL;
@@ -198,7 +200,9 @@ static void init_rset_mod_pwm(void)
 
 void envelope_output_init(void)
 {
+#if MCP4725_I2C_ENABLED
     init_i2c_dac();
+#endif
 #if PWM_COMPARISON_ENABLED
     init_rset_mod_pwm();
 #endif
@@ -208,6 +212,7 @@ void envelope_output_init(void)
     // Explicit connectivity probe - writes mid-scale once so success/failure
     // is obvious in the log immediately at boot, rather than inferred later
     // from DAC behavior.
+#if MCP4725_I2C_ENABLED
     {
         uint8_t probe_buf[2] = { 0x08, 0x00 };  // code 0x800 = mid-scale
         esp_err_t probe_err = i2c_master_write_to_device(MCP4725_I2C_PORT, MCP4725_I2C_ADDR,
@@ -220,6 +225,7 @@ void envelope_output_init(void)
                 MCP4725_I2C_ADDR, esp_err_to_name(probe_err));
         }
     }
+#endif
 
     s_envelope_queue = xQueueCreate(1, sizeof(float));
 

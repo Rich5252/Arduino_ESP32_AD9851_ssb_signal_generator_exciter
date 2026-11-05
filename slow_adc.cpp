@@ -1,9 +1,17 @@
 /**
- * slow_adc.cpp - see slow_adc.h.  (2026-11-04, not yet compiled for the ESP32 or run on hardware)
+ * slow_adc.cpp - see slow_adc.h.  (2026-11-04; driver mode bench-run, split mode NOT yet compiled or run on hardware)
  */
 
 #include "slow_adc.h"
 #include "config.h"
+
+// Fallback so an older config.h (without this line) still builds: reads run at boot.
+#ifndef SLOW_ADC_READS_DEFAULT
+#define SLOW_ADC_READS_DEFAULT 1
+#endif
+#ifndef SLOW_ADC_READ_MODE
+#define SLOW_ADC_READ_MODE 1          // 1 = split register-level read (no blocking), 0 = IDF adc_oneshot_read()
+#endif
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
@@ -17,6 +25,8 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+#include "soc/sens_struct.h"          // SENS.sar_meas2_ctrl2 - ADC2 RTC-controller register, split read below
+#include "diagnostics.h"              // late tick / stale commit counters shown by {K}
 #if AD9851_ATTACHED
 #include "carrier_output.h"
 #endif
@@ -77,67 +87,154 @@ static float dummy_mv(int idx, slow_ch_t *c)
     return c->dummy_mv * (0.9f + 0.2f * tri);
 }
 
-static bool read_mv(slow_ch_t *c, float *mv)
+static void raw_to_mv(slow_ch_t *c, int raw, float *mv)
 {
-    int raw = -1;
-    int64_t t0 = esp_timer_get_time();
-    esp_err_t e = adc_oneshot_read(s_adc2, c->chan, &raw);
-    uint32_t dt = (uint32_t)(esp_timer_get_time() - t0);
-    if (dt > s_read_max_us) s_read_max_us = dt;
-    s_read_sum_us = s_read_sum_us + dt;
-    s_read_count = s_read_count + 1;
-    c->reads++;
-    if (e != ESP_OK || raw < 0) { c->errors++; return false; }   // ESP_ERR_TIMEOUT = busy / arbiter said invalid
     c->last_raw = raw;
     int v = 0;
     if (c->cali && adc_cali_raw_to_voltage(c->cali, raw, &v) == ESP_OK) *mv = (float)v;
     else *mv = raw * 3100.0f / 4095.0f;
+}
+
+static void note_time(uint32_t dt)
+{
+    if (dt > s_read_max_us) s_read_max_us = dt;
+    s_read_sum_us = s_read_sum_us + dt;
+    s_read_count = s_read_count + 1;
+}
+
+// ---- Mode 0: IDF driver read. Blocking: setup + conversion + busy-wait inside portENTER_CRITICAL(&rtc_spinlock).
+// Bench 2026-11-04: late_ticks and stale_commits both rose by exactly one per read (24/s at 24 reads/s). ----
+static bool read_mv_driver(slow_ch_t *c, float *mv)
+{
+    int raw = -1;
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t e = adc_oneshot_read(s_adc2, c->chan, &raw);
+    note_time((uint32_t)(esp_timer_get_time() - t0));
+    c->reads++;
+    if (e != ESP_OK || raw < 0) { c->errors++; return false; }   // ESP_ERR_TIMEOUT = busy / arbiter said invalid
+    raw_to_mv(c, raw, mv);
     return true;
+}
+
+// ---- Mode 1: split register-level read (2026-11-04). ADC2 is configured once at boot by the driver (attenuation,
+// calibration code, SAR clock divider, RTC controller selection, arbiter: all left in place afterwards - nothing else
+// in this firmware touches ADC2). Then each conversion is: select the pad and pulse meas2_start_sar (two register
+// writes, no wait, no critical section); the result is collected on the task's NEXT wake, tens of ms later, long
+// after the conversion finished. Register layout: ESP32-S3 sens_struct.h (IDF v5.5) sar_meas2_ctrl2 =
+//   [15:0] meas2_data_sar (bits 12:0 data, 15:14 flag, 0 = valid), [16] done, [17] start, [18] start_force,
+//   [30:19] sar2_en_pad, [31] sar2_en_pad_force.
+// Whole-register reads/writes (.val) are used so the compiler never emits byte/halfword accesses to the peripheral.
+#define MEAS2_DONE_BIT    (1u << 16)
+#define MEAS2_START_BIT   (1u << 17)
+#define MEAS2_PAD_SHIFT   19
+#define MEAS2_PAD_MASK    (0xFFFu << MEAS2_PAD_SHIFT)
+
+static void split_start(adc_channel_t chan)
+{
+    uint32_t v = SENS.sar_meas2_ctrl2.val;
+    v = (v & ~MEAS2_PAD_MASK) | ((1u << (unsigned)chan) << MEAS2_PAD_SHIFT);
+    v &= ~MEAS2_START_BIT;
+    SENS.sar_meas2_ctrl2.val = v;               // pad selected, start low
+    SENS.sar_meas2_ctrl2.val = v | MEAS2_START_BIT;   // rising edge starts the conversion
+}
+
+// Returns 1 = got a valid raw value, 0 = not done yet (error), -1 = done but flagged invalid (arbiter / controller).
+static int split_collect(int *raw)
+{
+    uint32_t v = SENS.sar_meas2_ctrl2.val;
+    if (!(v & MEAS2_DONE_BIT)) return 0;
+    uint32_t data = v & 0xFFFFu;
+    if ((data >> 14) & 3u) return -1;
+    *raw = (int)(data & 0x1FFFu);
+    return 1;
+}
+
+static void publish_average(void)
+{
+    s_seq = s_seq + 1;                                   // odd: writing
+    for (int i = 0; i < SLOW_ADC_NCH; i++) {
+        slow_ch_t *c = &s_ch[i];
+        if (c->n) s_avg_mv[i] = c->sum_mv / (float)c->n; // no good sample this window: keep the last one
+        c->sum_mv = 0.0f;
+        c->n = 0;
+    }
+    s_windows = s_windows + 1;
+    s_seq = s_seq + 1;                                   // even: stable
 }
 
 static void slow_adc_task(void *arg)
 {
     (void)arg;
+#if SLOW_ADC_READ_MODE == 1
+    // One channel per wake, so 3 wakes make one "burst" and the per-channel rate is unchanged.
+    const TickType_t period = pdMS_TO_TICKS(SLOW_ADC_BURST_PERIOD_MS / SLOW_ADC_NCH);
+    const uint32_t steps_per_avg = (uint32_t)SLOW_ADC_NCH * SLOW_ADC_AVG_BURSTS;
+#else
     const TickType_t period = pdMS_TO_TICKS(SLOW_ADC_BURST_PERIOD_MS);
+    const uint32_t steps_per_avg = SLOW_ADC_AVG_BURSTS;
+#endif
     TickType_t wake = xTaskGetTickCount();
-    uint32_t bursts = 0;
+    uint32_t steps = 0;
+    int pending = -1;                                    // split mode: channel index with a conversion in flight
+    (void)pending;                                       // unused in driver mode
     for (;;) {
         if (!s_reads_on) {
             for (int i = 0; i < SLOW_ADC_NCH; i++) { s_ch[i].sum_mv = 0.0f; s_ch[i].n = 0; }   // drop a partial window
-            bursts = 0;
-            s_windows = 0;                                   // report sends nothing until a fresh average exists
+            steps = 0;
+            pending = -1;                                // forget any conversion in flight
+            s_windows = 0;                               // report sends nothing until a fresh average exists
             s_paused_ack = true;
             while (!s_reads_on) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             s_paused_ack = false;
-            wake = xTaskGetTickCount();                      // restart the schedule, so the pause is not counted late
+            wake = xTaskGetTickCount();                  // restart the schedule, so the pause is not counted late
         }
-        // vTaskDelayUntil returns pdFALSE if the deadline had already passed (the task was starved).
+        // xTaskDelayUntil returns pdFALSE if the deadline had already passed (the task was starved).
         if (xTaskDelayUntil(&wake, period) == pdFALSE) s_burst_late = s_burst_late + 1;
-        if (!s_reads_on) continue;                           // paused while waiting: skip this burst
+        if (!s_reads_on) continue;                       // paused while waiting: skip this step
 
+#if SLOW_ADC_READ_MODE == 1
+        int idx = (int)(steps % SLOW_ADC_NCH);
+        int64_t t0 = esp_timer_get_time();
+        if (pending >= 0) {                              // collect the conversion started on the previous wake
+            slow_ch_t *pc = &s_ch[pending];
+            int raw = 0;
+            int r = split_collect(&raw);
+            pc->reads++;
+            if (r == 1) {
+                float mv;
+                raw_to_mv(pc, raw, &mv);
+                pc->sum_mv += mv;
+                pc->n++;
+            } else {
+                pc->errors++;
+            }
+            pending = -1;
+        }
+        slow_ch_t *c = &s_ch[idx];
+        if (c->kind == CH_ADC2) {
+            split_start(c->chan);
+            pending = idx;
+        } else {
+            c->sum_mv += dummy_mv(idx, c);
+            c->n++;
+        }
+        note_time((uint32_t)(esp_timer_get_time() - t0));
+#else
         for (int i = 0; i < SLOW_ADC_NCH; i++) {
             slow_ch_t *c = &s_ch[i];
             float mv;
             if (c->kind == CH_ADC2) {
-                if (!read_mv(c, &mv)) continue;
+                if (!read_mv_driver(c, &mv)) continue;
             } else {
                 mv = dummy_mv(i, c);
             }
             c->sum_mv += mv;
             c->n++;
         }
-
-        if (++bursts >= SLOW_ADC_AVG_BURSTS) {
-            bursts = 0;
-            s_seq = s_seq + 1;                                   // odd: writing
-            for (int i = 0; i < SLOW_ADC_NCH; i++) {
-                slow_ch_t *c = &s_ch[i];
-                if (c->n) s_avg_mv[i] = c->sum_mv / (float)c->n; // no good sample this window: keep the last one
-                c->sum_mv = 0.0f;
-                c->n = 0;
-            }
-            s_windows = s_windows + 1;
-            s_seq = s_seq + 1;                                   // even: stable
+#endif
+        if (++steps >= steps_per_avg) {
+            steps = 0;
+            publish_average();
         }
     }
 }
@@ -200,12 +297,22 @@ void slow_adc_init(void)
         setup_channel(&s_ch[i]);
         s_avg_mv[i] = 0.0f;
     }
+    // One driver read per ADC2 channel at boot (both modes): proves the channel works and, for the split mode, leaves
+    // the ADC2 RTC controller, attenuation, calibration code and arbiter configured for the register-level reads.
+    for (int i = 0; i < SLOW_ADC_NCH; i++) {
+        slow_ch_t *c = &s_ch[i];
+        if (c->kind != CH_ADC2) continue;
+        int raw = -1;
+        esp_err_t e = adc_oneshot_read(s_adc2, c->chan, &raw);
+        Serial.printf("[slowadc] %s: first driver read %s raw %d\r\n", c->name, e == ESP_OK ? "OK" : "FAILED", raw);
+    }
     xTaskCreatePinnedToCore(slow_adc_task, "slow_adc", 3072, NULL, SLOW_ADC_TASK_PRIORITY, &s_task, SLOW_ADC_TASK_CORE);
     Serial.printf("[slowadc] running: FWD %s, REV %s, TEMP %s; burst every %d ms, average of %d bursts, task on "
-                  "core %d prio %d, reads %s, report %s\r\n",
+                  "core %d prio %d, read mode %s, reads %s, report %s\r\n",
                   s_ch[0].kind == CH_ADC2 ? "ADC2" : "dummy", s_ch[1].kind == CH_ADC2 ? "ADC2" : "dummy",
                   s_ch[2].kind == CH_ADC2 ? "ADC2" : "dummy", SLOW_ADC_BURST_PERIOD_MS, SLOW_ADC_AVG_BURSTS,
-                  SLOW_ADC_TASK_CORE, SLOW_ADC_TASK_PRIORITY, s_reads_on ? "on" : "paused", s_report_on ? "on" : "off");
+                  SLOW_ADC_TASK_CORE, SLOW_ADC_TASK_PRIORITY, SLOW_ADC_READ_MODE == 1 ? "split" : "driver",
+                  s_reads_on ? "on" : "paused", s_report_on ? "on" : "off");
 }
 
 static bool snapshot_mv(float mv[SLOW_ADC_NCH])
@@ -272,14 +379,37 @@ void slow_adc_format_status(char *buf, size_t buf_len)
     }
     if (n < buf_len) {
         uint32_t cnt = s_read_count;
-        snprintf(buf + n, buf_len - n,
-                 "->   = %.1f W fwd, %.2f W rev, SWR %.1f, %.2f degC; read us max %lu mean %.1f (n %lu); late %lu;"
+        int w = snprintf(buf + n, buf_len - n,
+                 "->   = %.1f W fwd, %.2f W rev, SWR %.1f, %.2f degC; %s us max %lu mean %.1f (n %lu); late %lu;"
                  " reads %s; report %s; core %d\r\n",
-                 r.fwd_w, r.rev_w, r.swr, r.temp_c, (unsigned long)s_read_max_us,
-                 cnt ? (double)s_read_sum_us / cnt : 0.0, (unsigned long)cnt, (unsigned long)s_burst_late,
+                 r.fwd_w, r.rev_w, r.swr, r.temp_c, SLOW_ADC_READ_MODE == 1 ? "split step" : "driver read",
+                 (unsigned long)s_read_max_us, cnt ? (double)s_read_sum_us / cnt : 0.0, (unsigned long)cnt,
+                 (unsigned long)s_burst_late,
                  s_reads_on ? (s_paused_ack ? "resuming" : "on") : (s_paused_ack ? "paused" : "pausing"),
                  s_report_on ? "on" : "off", SLOW_ADC_TASK_CORE);
+        if (w > 0) n += (size_t)w;
     }
+    // DSP health since the previous {K}: these rose by exactly one per driver-mode read on 2026-11-04.
+    // late ticks are cleared by 'r' (diagnostics_reset), stale commits are not; a counter that went down is
+    // treated as reset, so its whole value counts as the delta.
+    static uint32_t s_prev_late = 0, s_prev_stale = 0;
+    static int64_t s_prev_us = 0;
+    uint32_t late = diagnostics_get_late_tick_count(), stale = diagnostics_get_stale_commit_count();
+    int64_t now_us = esp_timer_get_time();
+    uint32_t dl = (late >= s_prev_late) ? late - s_prev_late : late;
+    uint32_t ds = (stale >= s_prev_stale) ? stale - s_prev_stale : stale;
+    double secs = s_prev_us ? (double)(now_us - s_prev_us) / 1e6 : 0.0;
+    if (n < buf_len) {
+        if (secs > 0.0)
+            snprintf(buf + n, buf_len - n, "->   dsp since last K (%.1f s): late ticks +%lu (%.2f/s), stale commits +%lu (%.2f/s)\r\n",
+                     secs, (unsigned long)dl, dl / secs, (unsigned long)ds, ds / secs);
+        else
+            snprintf(buf + n, buf_len - n, "->   dsp: late ticks %lu, stale commits %lu (rates from the next K)\r\n",
+                     (unsigned long)late, (unsigned long)stale);
+    }
+    s_prev_late = late; s_prev_stale = stale; s_prev_us = now_us;
+    s_read_sum_us = 0;   // mean and count also restart, so each K describes only the interval since the last one
+    s_read_count = 0;
     s_read_max_us = 0;   // so the next {K} shows the worst case since this one
 }
 

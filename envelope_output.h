@@ -44,6 +44,7 @@
 #include "esp_attr.h"
 
 // ---- MCP4725 DAC (RSET modulation output) ----
+// 2026-11-05: only used when MCP4725_I2C_ENABLED 1 (config.h); 47/48 are now reserved for the TXlink PA outputs.
 // NO LONGER CONNECTED (DAC hardware removed) - GPIO47/48 are the
 // highest general-purpose pins on the S3: not strapping, not flash/
 // PSRAM (even on Octal variants), not USB-JTAG, not shared with UART0/

@@ -349,6 +349,11 @@ void diagnostics_freqenv_capture_arm(void);
 // same as the original 'r' handler touched every counter inline.
 void diagnostics_reset(void);
 
+// 2026-11-04: read-only access for slow_adc's {K} status. late = ticks whose wake-up gap exceeded 1.5x nominal
+// (cleared by diagnostics_reset()/'r'); stale = AD9851 ISR stale commits since boot (not cleared by 'r').
+uint32_t diagnostics_get_late_tick_count(void);
+uint32_t diagnostics_get_stale_commit_count(void);
+
 bool diagnostics_get_muted(void);
 void diagnostics_toggle_muted(void);
 

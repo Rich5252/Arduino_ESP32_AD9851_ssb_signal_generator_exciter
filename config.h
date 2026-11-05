@@ -754,8 +754,13 @@
 // see slow_adc.h): core 1 = delays the gptimer/ADC ISRs, core 0 = delays dsp_task. Pick by A/B test.
 #define SLOW_ADC_TASK_CORE        0
 #define SLOW_ADC_TASK_PRIORITY    1      // lowest useful priority (idle is 0)
+// How a conversion is done. 0 = IDF adc_oneshot_read(): blocks with interrupts masked on SLOW_ADC_TASK_CORE for the
+// conversion; bench 2026-11-04 showed one late dsp tick + one stale AD9851 commit per read. 1 = split register-level
+// read (configure once with the driver at boot, then start a conversion and collect it on the next wake; no busy-wait,
+// no critical section). Reads are spread one channel per wake (every BURST_PERIOD/3 ms) in mode 1.
+#define SLOW_ADC_READ_MODE        1
 #define SLOW_ADC_REPORT_DEFAULT   1      // {F}{R}{S}{T} sent at boot; {K0}/{K1} switch it at run time
-#define SLOW_ADC_READS_DEFAULT    1      // reads running at boot; {K2} pauses, {K3} resumes
+#define SLOW_ADC_READS_DEFAULT    1      // reads running at boot; {K2} pauses them (task blocked, no ADC access), {K3} resumes
 // Conversion (slow_adc_conv.h): Nano curves, pin volts x scale = the volts the Nano would have seen. PLACEHOLDERS -
 // the detector curves need re-measuring on the new hardware.
 #define SLOW_ADC_FWD_SCALE        1.0f

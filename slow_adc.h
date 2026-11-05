@@ -27,6 +27,12 @@
  *   - on Core 1 a read would delay the 20 kHz gptimer ISR (AD9851 write) and the ADC conv_done ISR;
  *   - on Core 0 it would delay dsp_task's wake-up (watch overruns / late / stale_commits).
  * SLOW_ADC_TASK_CORE picks which; {K} reports the measured read time (max and mean) so the cost is known.
+ * Bench 2026-11-04 (driver mode, core 0): ADC2 oneshot works alongside the ADC1 mic stream (19227 reads, 0 errors),
+ * but late dsp ticks and stale AD9851 commits each rose by exactly one per read (24/s). The {K} "read time" of
+ * ~257 us mean is wall time including pre-emption by dsp_task, not the masked time (worst dsp gap was 104 us).
+ * Hence SLOW_ADC_READ_MODE 1 (split read, slow_adc.cpp): configure once with the driver, then per conversion only
+ * select the pad + pulse start (two register writes), collect the result on the next wake - no busy-wait, no
+ * critical section. {K} also shows late ticks / stale commits per second since the previous {K}.
  *
  * Not in this step: SWR/temperature trip, fan PWM, the Nano's TempTxOffset (RF pickup) correction.
  */
