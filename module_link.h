@@ -7,6 +7,8 @@
  * Nano the USB-serial chip shares the hardware UART, so everything printed to the PC also appeared on the TX pin
  * the modules listen to. On the ESP32-S3 `Serial` is native USB, so the modules get a dedicated output here instead:
  * UART0 TX on the board's TX header pin (MODULE_LINK_TX_GPIO, ESP32_hardware.h), 115200 8N1, TX only.
+ * MODULE_LINK_TX_INVERT (config.h, default 1) inverts the signal for a single N-MOSFET inverter driving the 5 V module
+ * line (the Nanos' own ~1k pull-ups); set 0 for a non-inverting buffer.
  *
  * Only the message the modules use is sent: "{f<Hz>}" + CR LF, same as the Nano's SendTunekHz(): the carrier
  * frequency rounded to the nearest kHz, written in Hz (e.g. 14201499 Hz -> "{f14201000}"). Sent
