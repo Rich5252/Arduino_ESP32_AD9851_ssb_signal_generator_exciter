@@ -123,7 +123,7 @@ flowchart LR
 | Stage | Rate / period | Notes |
 |---|---|---|
 | ADC capture | 80 kHz continuous mode, 16-sample DMA frames | `ADC_CONT_SAMPLE_FREQ_HZ` / `ADC_CONT_FRAME_SAMPLES`; chosen so it divides evenly against both the DSP tick rate and the hardware timer resolution. |
-| DSP tick / achieved Fs | 20 kHz (50 µs/sample) | `SAMPLE_RATE_HZ`; Hilbert transform uses a 65-tap FIR (`HILBERT_TAPS`). |
+| DSP tick / achieved Fs | 16 kHz (62.5 µs/sample) | `SAMPLE_RATE_HZ`; Hilbert transform uses a 65-tap FIR (`HILBERT_TAPS`). |
 | PWM (AM) carrier | 64 kHz, 10-bit duty resolution | `RSET_MOD_LEDC_FREQ_HZ` / `RSET_MOD_LEDC_RES`, tuned to be an exact multiple of the DSP tick rate. |
 | SDM (alternate AM path) | 1 MHz comparator rate, ±127 density clamp | `SDM_SAMPLE_RATE_HZ` / `SDM_DENSITY_CLAMP`; bench-compared against PWM, not the default. |
 | PM / SPI write | Bit-banged, ~25–33 µs per frequency update | Hardware SPI was tried first but measured ~50 µs/write from driver call overhead alone; a direct bit-banged GPIO implementation removed that overhead. |
