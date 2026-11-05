@@ -51,8 +51,7 @@
 // Serial. Note: if your exact module part number ends in "V" (e.g.
 // N8R8V), these two run at 1.8V logic instead of 3.3V - check before
 // this DAC (or anything else) actually gets wired back to them.
-#define MCP4725_SDA_GPIO      47
-#define MCP4725_SCL_GPIO      48
+// MCP4725_SDA_GPIO / MCP4725_SCL_GPIO (47/48) are defined in ESP32_hardware.h (via config.h)
 #define MCP4725_I2C_PORT      I2C_NUM_0
 #define MCP4725_I2C_FREQ_HZ   400000        // fast mode - standard (100kHz) is too slow to fit the sample period
 #define MCP4725_I2C_ADDR      0x61          // 0x60 with A0 tied low, 0x61 with A0 tied high
@@ -67,7 +66,7 @@
 // you're done comparing - this was removed from the main design in favour
 // of the DAC (imaging/spurious concerns discussed earlier), this is just
 // for a direct side-by-side look.
-#define RSET_MOD_LEDC_GPIO    2      // within the board's easy-access GPIO1-13 range; not otherwise used
+// RSET_MOD_LEDC_GPIO (GPIO2) is defined in ESP32_hardware.h (via config.h)
 #define RSET_MOD_LEDC_TIMER   LEDC_TIMER_0
 #define RSET_MOD_LEDC_CH      LEDC_CHANNEL_0
 // 2026-09-08: retuned from 78125 (max achievable at 10-bit res on the

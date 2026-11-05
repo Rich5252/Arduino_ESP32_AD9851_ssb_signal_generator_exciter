@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ESP32_hardware.h"   // 2026-11-05: all GPIO numbers (and pins to avoid) live there
+
 /**
  * config.h
  *
@@ -316,6 +318,16 @@
 #define SDM_COMPARISON_ENABLED 0
 
 #define dac_task_enabled 0
+// 2026-11-05: the MCP4725 I2C DAC (GPIO47/48, envelope_output.h) is not fitted and its I2C driver is no longer set up
+// at boot unless this is 1, which frees GPIO47/48 for the TXlink outputs below. dac_task_enabled needs it.
+#define MCP4725_I2C_ENABLED 0
+#if dac_task_enabled && !MCP4725_I2C_ENABLED
+#error "dac_task_enabled 1 needs MCP4725_I2C_ENABLED 1 (and its own I2C pins, see ESP32_hardware.h)"
+#endif
+#if MCP4725_I2C_ENABLED && (MCP4725_SDA_GPIO == TXLINK_REMOTE_PA_PTT_GPIO || MCP4725_SDA_GPIO == TXLINK_LOCAL_PA_TX_GPIO || \
+                            MCP4725_SCL_GPIO == TXLINK_REMOTE_PA_PTT_GPIO || MCP4725_SCL_GPIO == TXLINK_LOCAL_PA_TX_GPIO)
+#error "MCP4725 I2C pins clash with the TXlink PA outputs - move one set in ESP32_hardware.h"
+#endif
 
 // ---- Master enable for the ADC continuous-mode driver (adc_capture_init()/
 // adc_capture_service(), adc_capture.cpp). Set to 0 to skip starting the
@@ -346,7 +358,7 @@
 // loop iteration time on real hardware - much more trustworthy than
 // estimating it. Set to 0 to remove once you've got your measurement. ----
 #define TIMING_DEBUG_ENABLED 1
-#define TIMING_DEBUG_GPIO     4   // within the board's easy-access GPIO1-13 range; not otherwise used
+// TIMING_DEBUG_GPIO (GPIO4) is defined in ESP32_hardware.h
 
 // ---- Fs jitter hunt: two ADDITIONAL debug pins, both raw hardware-
 // register toggles (GPIO.out_w1ts/w1tc, not digitalWrite - see the .ino's
@@ -375,7 +387,7 @@
 // catches every firing, not just every other one. It's the EDGE timing
 // that matters here, not the pulse width (which is just however long the
 // two back-to-back register writes take - negligible, sub-100ns).
-#define TIMING_DEBUG_GPIO_ISR  5   // toggled every gptimer alarm ISR fire (on_timer_alarm(), Core 1)
+// TIMING_DEBUG_GPIO_ISR (GPIO5, toggled every gptimer alarm ISR fire) is defined in ESP32_hardware.h
 
 // 2026-09-18: 7.7Hz two-tone comb hunt. Real hardware now shows a genuine
 // ~7.69Hz component on BOTH TIMING_DEBUG_GPIO (pin4) and TIMING_DEBUG_GPIO_ISR
@@ -439,7 +451,7 @@
 // back to its own pin, once one becomes available) if the ADC-ISR
 // contention question ever needs re-checking directly.
 #define ADC_ISR_DEBUG_PIN_ENABLED 0
-#define TIMING_DEBUG_GPIO_ADC  39  // toggled every ADC conv_done ISR fire (adc_conv_done_cb(), Core 1).
+// TIMING_DEBUG_GPIO_ADC (GPIO39, toggled every ADC conv_done ISR fire) is defined in ESP32_hardware.h. History:
                                    // TRIED GPIO3 FIRST, REVERTED: real hardware confirmed the ADC
                                    // continuous driver produced ZERO conversions the moment this pin's
                                    // toggling was enabled (actual sps=0, callbacks=0, both mic and
@@ -733,14 +745,9 @@
 // instrumentation line above (same INSTRUMENTATION_PERIOD_MS cadence, no extra serial traffic of its own).
 // UNCOMPILED / UNTESTED ON HARDWARE as written.
 #define SLOW_ADC_ENABLED          1      // 0 = module compiled to stubs, firmware behaves exactly as before
-// GPIO per channel. -1 = DUMMY (synthetic value below, no ADC access at all). Only ADC2 pins are accepted
-// (GPIO11-20; 11/12 are the AD9851, 19/20 are USB); an ADC1 pin is refused at boot because ADC1 streams the mic.
-// 2026-11-04: user's board exposes GPIO14-16 for these. GPIO13 avoided on purpose: the mic ADC driver's activity
-// was scoped coupling 5 kHz pulses onto that pad (2026-09-02, see ADC_CAPTURE_ENABLED). GPIO15/16 are also the
-// S3's 32 kHz crystal pins, only a conflict if the module fits that crystal.
-#define SLOW_ADC_FWD_GPIO         14     // ADC2 ch3
-#define SLOW_ADC_REV_GPIO         15     // ADC2 ch4
-#define SLOW_ADC_TEMP_GPIO        16     // ADC2 ch5
+// Pins: SLOW_ADC_FWD/REV/TEMP_GPIO (14/15/16, ADC2) are in ESP32_hardware.h. Set one to -1 there for a DUMMY channel
+// (synthetic value below, no ADC access). Only ADC2 pins are accepted; an ADC1 pin is refused at boot (mic stream).
+// GPIO15/16 are also the S3's 32 kHz crystal pins, only a conflict if the module fits that crystal.
 // Pin voltages used for dummy channels: ~1.8 W forward (swings +/-10 % over 8 s), ~0.08 W reflected (SWR ~1.5),
 // 25 degC with the NTC values below.
 #define SLOW_ADC_DUMMY_FWD_MV     300.0f

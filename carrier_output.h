@@ -18,10 +18,7 @@
 #include <stdbool.h>
 #include "ad9851.h"
 
-#define AD9851_PIN_DATA   10
-#define AD9851_PIN_WCLK   12
-#define AD9851_PIN_FQUD   11
-#define AD9851_PIN_RESET  9
+// AD9851_PIN_RESET/DATA/FQUD/WCLK (9/10/11/12) are defined in ESP32_hardware.h (via config.h)
 #define REF_CLK_HZ        30000000u
 // ---- Carrier frequency and calibration (2026-10-12) ----
 // CARRIER_NOMINAL_HZ is the frequency wanted on the air (boot default; changed at run time with the serial

@@ -11,7 +11,7 @@
  *     {A-12.3}{F1.8}{R0.08}{S1.5}{T25.00}    ({A} meter on, '#')
  *
  * Each channel is either
- *   DUMMY : its GPIO in config.h is -1. No ADC access at all; a synthetic pin voltage is used (SLOW_ADC_DUMMY_*_MV,
+ *   DUMMY : its GPIO in ESP32_hardware.h is -1. No ADC access at all; a synthetic pin voltage is used (SLOW_ADC_DUMMY_*_MV,
  *           forward power slowly swings +/-10 % so the plugin display visibly updates). This is the default until
  *           the real pins are chosen, so the serial/plugin side can be tested with zero risk to the audio path.
  *   ADC2  : a GPIO that maps to ADC2 (GPIO11-20 on the S3; 11/12 are the AD9851, 19/20 USB). Read with the IDF

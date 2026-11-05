@@ -15,7 +15,7 @@
 #include <math.h>   // isnan()/isinf() (via isfinite()) - see adc_capture_get_lpf_canary()
 
 #define ADC_UNIT       ADC_UNIT_1
-#define ADC_CHANNEL    ADC_CHANNEL_5   // GPIO6 on ESP32-S3 - Micr input
+#define ADC_CHANNEL    MIC_ADC1_CHANNEL   // mic input, GPIO6 = ADC1 ch5 (ESP32_hardware.h)
 
 static adc_continuous_handle_t s_adc;
 
