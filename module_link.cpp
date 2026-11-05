@@ -22,7 +22,11 @@ void module_link_init(void)
 {
     Serial0.setTxBufferSize(256);   // must be before begin(); one "{f..}" line is 13 bytes
     // RX pin given explicitly so the driver cannot pick some other default; nothing is read from it.
-    Serial0.begin(MODULE_LINK_BAUD, SERIAL_8N1, MODULE_LINK_RX_GPIO, MODULE_LINK_TX_GPIO);
+#ifndef MODULE_LINK_TX_INVERT
+#define MODULE_LINK_TX_INVERT 0
+#endif
+    // Last argument inverts the UART lines (TX and RX; RX is unused) for the inverting transistor driver, see config.h.
+    Serial0.begin(MODULE_LINK_BAUD, SERIAL_8N1, MODULE_LINK_RX_GPIO, MODULE_LINK_TX_GPIO, MODULE_LINK_TX_INVERT != 0);
     s_up = true;
 }
 

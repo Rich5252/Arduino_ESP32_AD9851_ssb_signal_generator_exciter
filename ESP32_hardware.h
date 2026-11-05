@@ -28,7 +28,8 @@
  *   GPIO 20   USB D+
  *   GPIO 39   chirp-mode square-wave reference; also the (off by default) ADC-ISR and command-window debug marker
  *   GPIO 43   header TX: UART0 TX to the filter/ATU modules, "{f<Hz>}" at 115200 (module_link.cpp). Also carries the
- *             chip's ROM/bootloader text at reset. 3.3 V - buffer it for 5 V modules.
+ *             chip's ROM/bootloader text at reset. Driver: one 2N7000/BSS138 (gate from GPIO43, ~100k gate-GND,
+ *             drain to the module line pulled up by the Nanos' ~1k) with MODULE_LINK_TX_INVERT 1 in config.h.
  *   GPIO 44   header RX: UART0 RX, claimed by the same UART but nothing is read (modules never talk back)
  *
  * ---- Reserved for the TXlink port (no code uses them yet) ---------------------------------------------------

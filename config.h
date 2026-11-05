@@ -745,6 +745,12 @@
 // Needs Tools > USB CDC On Boot: Enabled (Serial on native USB). 0 = UART0 not touched at all.
 #define MODULE_LINK_ENABLED       1
 #define MODULE_LINK_BAUD          115200   // same as the TXlink Nano
+// 1 = invert the UART signal in the ESP32 (idle LOW on the pin), for a single inverting transistor driver:
+// GPIO43 -> 2N7000/BSS138 gate (~100k gate to GND), source to GND, drain to the modules' RX line, pulled up to 5 V by
+// the Nanos' own ~1k (USB chip TX). The transistor's inversion cancels this one. 0 = normal polarity (idle HIGH) for a
+// non-inverting buffer. The ROM start-up text at reset is NOT inverted (it comes before this code), so with 1 the
+// module line sits low ("break") with garbage for a moment at power-up.
+#define MODULE_LINK_TX_INVERT     1
 
 // ---- Slow ADC channels (2026-11-04, Phase 2 step 1), see slow_adc.h ----
 // Forward power, reflected power and PA temperature from the TXlink Nano, appended as {F..}{R..}{S..}{T..} to the
