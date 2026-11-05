@@ -21,6 +21,7 @@
 #include "instrumentation.h"
 #include "brace_input.h"
 #include "slow_adc.h"
+#include "module_link.h"
 #if AD9851_ATTACHED
 #include "relative_delay.h"
 #include "carrier_output.h"
@@ -265,6 +266,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
                               (unsigned)hz, (unsigned)CARRIER_MIN_HZ, (unsigned)CARRIER_MAX_HZ,
                               (unsigned)carrier_output_get_freq_hz());
             } else {
+                module_link_send_freq_khz(carrier_output_get_freq_hz());   // filter/ATU modules: {f<kHz*1000>}, like the Nano
                 serial_reply("-> carrier set to %u Hz (clock calibration %d ppb)\r\n",
                               (unsigned)carrier_output_get_freq_hz(), (int)carrier_output_get_cal_ppb());
             }

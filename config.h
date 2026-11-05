@@ -740,6 +740,12 @@
 // starting value, not a tuned one.
 #define INSTRUMENTATION_LEVEL_DECAY_DB_PER_S 15.0f
 
+// ---- Module link to the filter/ATU modules (2026-11-05), see module_link.h ----
+// "{f<Hz rounded to kHz>}" on the header TX pin (UART0, MODULE_LINK_TX_GPIO), at boot and on every {F<Hz>}.
+// Needs Tools > USB CDC On Boot: Enabled (Serial on native USB). 0 = UART0 not touched at all.
+#define MODULE_LINK_ENABLED       1
+#define MODULE_LINK_BAUD          115200   // same as the TXlink Nano
+
 // ---- Slow ADC channels (2026-11-04, Phase 2 step 1), see slow_adc.h ----
 // Forward power, reflected power and PA temperature from the TXlink Nano, appended as {F..}{R..}{S..}{T..} to the
 // instrumentation line above (same INSTRUMENTATION_PERIOD_MS cadence, no extra serial traffic of its own).

@@ -9,7 +9,7 @@
  * Included by config.h, so every file that includes config.h sees these. Plain #defines only (C and C++).
  *
  * Board: ESP32-S3 Super Mini (ssb_mic_test_commands.md, 2026-09-02): GPIO1-13 on the main header, GPIO39-48 on small
- * solder pads (43/44 not usable on this board), 14-16 reachable for the slow ADC. Many S3 Super Mini boards carry a
+ * solder pads, TX/RX (GPIO43/44) on the header, 14-16 reachable for the slow ADC. Many S3 Super Mini boards carry a
  * WS2812 RGB LED on GPIO48 - check this one before using 48 as the TX-on output (the LED would load and react to it).
  *
  * ---- In use ---------------------------------------------------------------------------------------------------
@@ -27,6 +27,9 @@
  *   GPIO 19   USB D-  (USB-CDC serial to the PC / SDR plugin)             not configurable
  *   GPIO 20   USB D+
  *   GPIO 39   chirp-mode square-wave reference; also the (off by default) ADC-ISR and command-window debug marker
+ *   GPIO 43   header TX: UART0 TX to the filter/ATU modules, "{f<Hz>}" at 115200 (module_link.cpp). Also carries the
+ *             chip's ROM/bootloader text at reset. 3.3 V - buffer it for 5 V modules.
+ *   GPIO 44   header RX: UART0 RX, claimed by the same UART but nothing is read (modules never talk back)
  *
  * ---- Reserved for the TXlink port (no code uses them yet) ---------------------------------------------------
  *   GPIO 40   key in            input, active low, pull-up
@@ -50,7 +53,7 @@
  *   ADC1 pins    (1-10): ADC1 runs in continuous mode for the mic, so no oneshot reads on ADC1.
  *   GPIO 26-32   SPI flash / PSRAM inside the module.
  *   GPIO 33-37   octal PSRAM on R8/R16 modules (free on modules without octal PSRAM - not checked for this one).
- *   GPIO 43/44   UART0 TX/RX (not on pads on this board anyway).
+ *   (GPIO 43/44 are in use as the module link above; 44 must not be driven by a 5 V signal.)
  *
  * ---- Spare (not used, not on the avoid list) -----------------------------------------------------------------
  *   1, 7, 8 (ADC1 - analogue or slow signals only), 17, 18 (ADC2), 21, 38. Also 4/5/39 if the debug pins go.
@@ -90,6 +93,10 @@
 #define TXLINK_FAN_PWM_GPIO       42
 #define TXLINK_REMOTE_PA_PTT_GPIO 47
 #define TXLINK_LOCAL_PA_TX_GPIO   48
+
+// ---- Module link: UART0 to the filter/ATU modules (module_link.cpp), board header TX/RX ----
+#define MODULE_LINK_TX_GPIO       43
+#define MODULE_LINK_RX_GPIO       44     // claimed by the UART, unused
 
 // ---- MCP4725 I2C DAC: NOT FITTED. Only used when MCP4725_I2C_ENABLED is 1 (config.h), and then it would clash
 // with the TXlink PA outputs on 47/48 (config.h refuses to build that combination). ----
