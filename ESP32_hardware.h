@@ -26,6 +26,8 @@
  *   GPIO 16   slow ADC PA temperature (NTC), ADC2 channel 5
  *   GPIO 19   USB D-  (USB-CDC serial to the PC / SDR plugin)             not configurable
  *   GPIO 20   USB D+
+ *   GPIO 40   TXout: PA power switching, ACTIVE HIGH (high = TX on), {U}/{D} (tx_control.cpp). Driven low first thing
+ *             in setup(); fit a ~10k pull-down so it stays off during reset/boot.
  *   GPIO 39   chirp-mode square-wave reference; also the (off by default) ADC-ISR and command-window debug marker
  *   GPIO 43   header TX: UART0 TX to the filter/ATU modules, "{f<Hz>}" at 115200 (module_link.cpp). Also carries the
  *             chip's ROM/bootloader text at reset. Driver: one 2N7000/BSS138 (gate from GPIO43, ~100k gate-GND,
@@ -33,12 +35,14 @@
  *   GPIO 44   header RX: UART0 RX, claimed by the same UART but nothing is read (modules never talk back)
  *
  * ---- Reserved for the TXlink port (no code uses them yet) ---------------------------------------------------
- *   GPIO 40   key in            input, active low, pull-up
+ *   key in            input, active low, pull-up - pin to be chosen (40 is now TXout, 2026-11-06)
  *   GPIO 41   mic PTT in        input, active low, pull-up
  *   GPIO 42   PA fan PWM out    own LEDC timer (timer 0 belongs to the RSET PWM)
  *   GPIO 47   remote PA PTT out
  *   GPIO 48   local 2 W PA TX-on out
  *   Fit ~10k pull-downs on 42/47/48 so the fan and both PTTs are off during reset/boot or if firmware stops early.
+ *   (Reserved list written 2026-11-05; 40 taken by TXout 2026-11-06 - whether "local PA TX-on" on 48 is still
+ *   needed alongside TXout is open.)
  *   40-42 are the JTAG MTDO/MTDI/MTMS pins: free while pad JTAG is not used (USB-JTAG is on 19/20).
  *   47/48 run at 1.8 V on "V" modules (1.8 V flash); see the board note above about an RGB LED on GPIO48.
  *
@@ -88,8 +92,11 @@
 #define TIMING_DEBUG_GPIO_ISR     5      // gptimer alarm ISR
 #define TIMING_DEBUG_GPIO_ADC     39     // ADC ISR marker / command window / chirp reference (one at a time)
 
+// ---- TX switching (tx_control.cpp) ----
+#define TXOUT_GPIO                40     // TXout, active high (high = TX on)
+
 // ---- TXlink port, reserved (not used by any code yet) ----
-#define TXLINK_KEY_IN_GPIO        40
+#define TXLINK_KEY_IN_GPIO        -1     // not assigned yet (was 40, now TXout)
 #define TXLINK_MIC_PTT_IN_GPIO    41
 #define TXLINK_FAN_PWM_GPIO       42
 #define TXLINK_REMOTE_PA_PTT_GPIO 47
@@ -103,3 +110,9 @@
 // with the TXlink PA outputs on 47/48 (config.h refuses to build that combination). ----
 #define MCP4725_SDA_GPIO          47
 #define MCP4725_SCL_GPIO          48
+
+// ---- Clash checks for the pins above ----
+#if TXOUT_GPIO == TXLINK_MIC_PTT_IN_GPIO || TXOUT_GPIO == TXLINK_FAN_PWM_GPIO || TXOUT_GPIO == TXLINK_REMOTE_PA_PTT_GPIO || \
+    TXOUT_GPIO == TXLINK_LOCAL_PA_TX_GPIO || TXOUT_GPIO == TXLINK_KEY_IN_GPIO || TXOUT_GPIO == MODULE_LINK_TX_GPIO
+#error "TXOUT_GPIO clashes with another pin in ESP32_hardware.h"
+#endif

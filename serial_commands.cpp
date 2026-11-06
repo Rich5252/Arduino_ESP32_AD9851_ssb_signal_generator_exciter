@@ -22,6 +22,7 @@
 #include "brace_input.h"
 #include "slow_adc.h"
 #include "module_link.h"
+#include "tx_control.h"
 #if AD9851_ATTACHED
 #include "relative_delay.h"
 #include "carrier_output.h"
@@ -322,9 +323,23 @@ static void brace_run_command(const brace_cmd_t *cmd)
             }
             break;
         }
+        case 'U':
+        case 'D': {
+            // 2026-11-06 {U}/{D}: TXout on/off (GPIO40, active high), tx_control.h. For now only the pin switches;
+            // the rest of the Nano's {U}/{D} behaviour is not ported yet. An argument is refused so a garbled
+            // command cannot key the transmitter.
+            if (cmd->arg[0] != 0) {
+                serial_reply("-> {%c} takes no argument - ignored, TXout stays %s. Received argument '%s'\r\n",
+                              cmd->letter, tx_out_get() ? "ON" : "OFF", cmd->arg);
+                break;
+            }
+            tx_out_set(cmd->letter == 'U');
+            serial_reply("-> TXout %s (GPIO%d %s)\r\n", tx_out_get() ? "ON" : "OFF", TXOUT_GPIO, tx_out_get() ? "high" : "low");
+            break;
+        }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TXout on/off)\r\n", cmd->letter);
             break;
     }
 }

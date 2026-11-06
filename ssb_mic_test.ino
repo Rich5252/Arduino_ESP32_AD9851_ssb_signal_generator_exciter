@@ -140,6 +140,7 @@
 #include "instrumentation.h"
 #include "slow_adc.h"
 #include "module_link.h"
+#include "tx_control.h"
 
 // (No TAG/ESP_LOG here - everything in this file uses Serial.printf so it's
 // visible regardless of the IDE's Core Debug Level setting. ssb_dsp.c has
@@ -1247,6 +1248,7 @@ static void init_sample_timer(void)
 
 void setup()
 {
+    tx_control_init();           // 2026-11-06 TXout (GPIO40, active high) driven OFF before anything else, see tx_control.h
     Serial.begin(921600);
     module_link_init();          // 2026-11-05 UART0 TX to the filter/ATU modules, see module_link.h
     delay(1000);  // give USB CDC time to enumerate before we print - 200ms
