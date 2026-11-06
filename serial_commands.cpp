@@ -325,21 +325,42 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         case 'U':
         case 'D': {
-            // 2026-11-06 {U}/{D}: TXout on/off (GPIO40, active high), tx_control.h. For now only the pin switches;
-            // the rest of the Nano's {U}/{D} behaviour is not ported yet. An argument is refused so a garbled
-            // command cannot key the transmitter.
+            // 2026-11-06 {U}/{D}: TX requested / not requested (tx_control.h). TXout (GPIO40, active high) =
+            // requested AND LocalPAactive ({L} >= 0). The rest of the Nano's {U}/{D} behaviour is not ported yet.
+            // An argument is refused so a garbled command cannot key the transmitter.
             if (cmd->arg[0] != 0) {
                 serial_reply("-> {%c} takes no argument - ignored, TXout stays %s. Received argument '%s'\r\n",
                               cmd->letter, tx_out_get() ? "ON" : "OFF", cmd->arg);
                 break;
             }
-            tx_out_set(cmd->letter == 'U');
-            serial_reply("-> TXout %s (GPIO%d %s)\r\n", tx_out_get() ? "ON" : "OFF", TXOUT_GPIO, tx_out_get() ? "high" : "low");
+            tx_request_set(cmd->letter == 'U');
+            serial_reply("-> TX %s, TXout %s (GPIO%d %s)%s\r\n", tx_request_get() ? "requested" : "off",
+                          tx_out_get() ? "ON" : "OFF", TXOUT_GPIO, tx_out_get() ? "high" : "low",
+                          (tx_request_get() && !tx_local_pa_active()) ? " - held off: L is negative (diagnostic mode)" : "");
+            break;
+        }
+        case 'L': {
+            // 2026-11-06 {Lxxx}: output level, % of envelope voltage, signed (tx_control.h). Negative = diagnostic
+            // mode (DDS driven at |xxx| %, local PA / TXout off). Strict parse: optional sign then 1-4 digits;
+            // anything else is refused and the level left unchanged.
+            const char *a = cmd->arg;
+            int i = 0, sign = 1, val = 0, nd = 0;
+            if (a[i] == '-' || a[i] == '+') { if (a[i] == '-') sign = -1; i++; }
+            while (a[i] >= '0' && a[i] <= '9' && nd < 5) { val = val * 10 + (a[i] - '0'); i++; nd++; }
+            if (nd == 0 || nd > 4 || a[i] != 0) {
+                serial_reply("-> {L} needs a whole number, -100..100 (%% of envelope voltage). Received '%s' - level "
+                              "unchanged at L%d\r\n", a, tx_level_get());
+                break;
+            }
+            tx_level_set(sign * val);
+            serial_reply("-> TX level L%d = %d%% envelope voltage%s, local PA %s, TXout %s\r\n", tx_level_get(),
+                          tx_level_get() < 0 ? -tx_level_get() : tx_level_get(), val > 100 ? " (clamped to 100)" : "",
+                          tx_local_pa_active() ? "active" : "OFF (diagnostic mode)", tx_out_get() ? "ON" : "OFF");
             break;
         }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TXout on/off)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, L = level %%)\r\n", cmd->letter);
             break;
     }
 }

@@ -324,8 +324,8 @@
 #if dac_task_enabled && !MCP4725_I2C_ENABLED
 #error "dac_task_enabled 1 needs MCP4725_I2C_ENABLED 1 (and its own I2C pins, see ESP32_hardware.h)"
 #endif
-#if MCP4725_I2C_ENABLED && (MCP4725_SDA_GPIO == TXLINK_REMOTE_PA_PTT_GPIO || MCP4725_SDA_GPIO == TXLINK_LOCAL_PA_TX_GPIO || \
-                            MCP4725_SCL_GPIO == TXLINK_REMOTE_PA_PTT_GPIO || MCP4725_SCL_GPIO == TXLINK_LOCAL_PA_TX_GPIO)
+#if MCP4725_I2C_ENABLED && (MCP4725_SDA_GPIO == EXTPAOUT_GPIO || MCP4725_SCL_GPIO == EXTPAOUT_GPIO || \
+                            MCP4725_SDA_GPIO == TXOUT_GPIO || MCP4725_SCL_GPIO == TXOUT_GPIO)
 #error "MCP4725 I2C pins clash with the TXlink PA outputs - move one set in ESP32_hardware.h"
 #endif
 

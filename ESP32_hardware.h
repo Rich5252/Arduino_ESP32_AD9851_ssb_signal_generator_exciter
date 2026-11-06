@@ -26,23 +26,24 @@
  *   GPIO 16   slow ADC PA temperature (NTC), ADC2 channel 5
  *   GPIO 19   USB D-  (USB-CDC serial to the PC / SDR plugin)             not configurable
  *   GPIO 20   USB D+
- *   GPIO 40   TXout: PA power switching, ACTIVE HIGH (high = TX on), {U}/{D} (tx_control.cpp). Driven low first thing
- *             in setup(); fit a ~10k pull-down so it stays off during reset/boot.
+ *   GPIO 40   TXout (Nano name): antenna relay + local 2 W PA power, ACTIVE HIGH (high = TX on), {U}/{D}
+ *             (tx_control.cpp). Driven low first thing in setup(); fit a ~10k pull-down so it stays off at reset/boot.
  *   GPIO 39   chirp-mode square-wave reference; also the (off by default) ADC-ISR and command-window debug marker
  *   GPIO 43   header TX: UART0 TX to the filter/ATU modules, "{f<Hz>}" at 115200 (module_link.cpp). Also carries the
  *             chip's ROM/bootloader text at reset. Driver: one 2N7000/BSS138 (gate from GPIO43, ~100k gate-GND,
  *             drain to the module line pulled up by the Nanos' ~1k) with MODULE_LINK_TX_INVERT 1 in config.h.
  *   GPIO 44   header RX: UART0 RX, claimed by the same UART but nothing is read (modules never talk back)
  *
- * ---- Reserved for the TXlink port (no code uses them yet) ---------------------------------------------------
- *   key in            input, active low, pull-up - pin to be chosen (40 is now TXout, 2026-11-06)
- *   GPIO 41   mic PTT in        input, active low, pull-up
- *   GPIO 42   PA fan PWM out    own LEDC timer (timer 0 belongs to the RSET PWM)
- *   GPIO 47   remote PA PTT out
- *   GPIO 48   local 2 W PA TX-on out
- *   Fit ~10k pull-downs on 42/47/48 so the fan and both PTTs are off during reset/boot or if firmware stops early.
- *   (Reserved list written 2026-11-05; 40 taken by TXout 2026-11-06 - whether "local PA TX-on" on 48 is still
- *   needed alongside TXout is open.)
+ * ---- Reserved for the TXlink port (no code uses them yet) - TXlink4_Nano names where the Nano had the pin -------
+ *   KeyIn     pin not chosen yet     input, active low, pull-up (Nano D8)
+ *   GPIO 41   MicPTTin               input, active low, pull-up (new, no Nano equivalent)
+ *   GPIO 42   FanPin                 PA fan out, active high (Nano D10, on/off there; PWM here needs its own LEDC
+ *                                    timer - timer 0 belongs to the RSET PWM)
+ *   GPIO 47   ExtPAout               external (remote) PA PTT, active high (Nano D4)
+ *   GPIO 48   free (was "local PA TX-on", which is TXout - 2026-11-06)
+ *   Fit ~10k pull-downs on 40/42/47 so TXout, the fan and the external PA are off during reset/boot.
+ *   Nano pins with no pin here: KeyOut (D7, RF on via the DDS level shaper) and TXlevelPin (D5, PWM DDS level) -
+ *   on the ESP32 RF on/off and level are done in firmware (DDS + RSET envelope PWM on GPIO2).
  *   40-42 are the JTAG MTDO/MTDI/MTMS pins: free while pad JTAG is not used (USB-JTAG is on 19/20).
  *   47/48 run at 1.8 V on "V" modules (1.8 V flash); see the board note above about an RGB LED on GPIO48.
  *
@@ -95,24 +96,27 @@
 // ---- TX switching (tx_control.cpp) ----
 #define TXOUT_GPIO                40     // TXout, active high (high = TX on)
 
-// ---- TXlink port, reserved (not used by any code yet) ----
-#define TXLINK_KEY_IN_GPIO        -1     // not assigned yet (was 40, now TXout)
-#define TXLINK_MIC_PTT_IN_GPIO    41
-#define TXLINK_FAN_PWM_GPIO       42
-#define TXLINK_REMOTE_PA_PTT_GPIO 47
-#define TXLINK_LOCAL_PA_TX_GPIO   48
+// ---- TXlink port, reserved (not used by any code yet); Nano names ----
+#define KEYIN_GPIO                -1     // Nano KeyIn, active low - pin not chosen yet
+#define MIC_PTT_IN_GPIO           41     // new, active low
+#define FANPIN_GPIO               42     // Nano FanPin, active high
+#define EXTPAOUT_GPIO             47     // Nano ExtPAout, external PA PTT, active high
 
 // ---- Module link: UART0 to the filter/ATU modules (module_link.cpp), board header TX/RX ----
 #define MODULE_LINK_TX_GPIO       43
 #define MODULE_LINK_RX_GPIO       44     // claimed by the UART, unused
 
-// ---- MCP4725 I2C DAC: NOT FITTED. Only used when MCP4725_I2C_ENABLED is 1 (config.h), and then it would clash
-// with the TXlink PA outputs on 47/48 (config.h refuses to build that combination). ----
+// ---- MCP4725 I2C DAC: NOT FITTED. Only used when MCP4725_I2C_ENABLED is 1 (config.h), and then SDA would clash
+// with ExtPAout on 47 (config.h refuses to build that combination). ----
 #define MCP4725_SDA_GPIO          47
 #define MCP4725_SCL_GPIO          48
 
 // ---- Clash checks for the pins above ----
-#if TXOUT_GPIO == TXLINK_MIC_PTT_IN_GPIO || TXOUT_GPIO == TXLINK_FAN_PWM_GPIO || TXOUT_GPIO == TXLINK_REMOTE_PA_PTT_GPIO || \
-    TXOUT_GPIO == TXLINK_LOCAL_PA_TX_GPIO || TXOUT_GPIO == TXLINK_KEY_IN_GPIO || TXOUT_GPIO == MODULE_LINK_TX_GPIO
+#if TXOUT_GPIO == MIC_PTT_IN_GPIO || TXOUT_GPIO == FANPIN_GPIO || TXOUT_GPIO == EXTPAOUT_GPIO || \
+    TXOUT_GPIO == KEYIN_GPIO || TXOUT_GPIO == MODULE_LINK_TX_GPIO
 #error "TXOUT_GPIO clashes with another pin in ESP32_hardware.h"
+#endif
+#if KEYIN_GPIO >= 0 && (KEYIN_GPIO == MIC_PTT_IN_GPIO || KEYIN_GPIO == FANPIN_GPIO || KEYIN_GPIO == EXTPAOUT_GPIO || \
+    KEYIN_GPIO == MODULE_LINK_TX_GPIO || KEYIN_GPIO == MODULE_LINK_RX_GPIO)
+#error "KEYIN_GPIO clashes with another pin in ESP32_hardware.h"
 #endif

@@ -981,6 +981,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // {A} RF-envelope level meter tap (instrumentation.h): last point before predistort/PWM mapping, so 0 dB = 1.0
         // at the predistort LUT input. One fabsf + multiply + compares; no Serial on this path.
         instrumentation_record_envelope(envelope);
+        // 2026-11-06 {Lxxx} output level (tx_control.h): scale to the L ceiling (envelope voltage %) AFTER ALC/soft-limit
+        // and the {A} tap, BEFORE predistort - everything upstream still works relative to 100 %. L100 = unchanged.
+        envelope = tx_level_apply(envelope);
 
         // envelope is roughly [0,1] for typical mic levels but not
         // rigorously bounded - clamp before handing off either way.
