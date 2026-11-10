@@ -90,6 +90,10 @@ void tx_level_set(int level);
 int  tx_level_get(void);
 bool tx_local_pa_active(void);
 
+// true while TX is not requested ({D}) and the level is exactly {L0}: the slow-ADC {F}{R}{S}{T} serial report is
+// suppressed then (instrumentation.cpp); the ADC readings and any checks on them carry on.
+bool tx_report_idle(void);
+
 // dsp_task, once per full tick, after tx_control_tick(): level x edge, floor-aware
 float tx_level_apply(float envelope);
 float tx_level_current_scale(void);  // level x edge, last tick

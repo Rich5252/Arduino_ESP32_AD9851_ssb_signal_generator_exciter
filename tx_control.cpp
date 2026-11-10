@@ -273,6 +273,7 @@ void tx_level_set(int level)
 
 int  tx_level_get(void)       { return s_level; }
 bool tx_local_pa_active(void) { return s_local_pa; }
+bool tx_report_idle(void)     { return !s_requested && s_level == 0; }
 
 float IRAM_ATTR tx_level_apply(float envelope)
 {

@@ -1,6 +1,7 @@
 #include "instrumentation.h"
 #include "config.h"
 #include "slow_adc.h"
+#include "tx_control.h"
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
@@ -107,7 +108,9 @@ void instrumentation_format_level(char *buf, unsigned buf_len, float level_db)
 void instrumentation_service(void)
 {
     int mode = s_mode;
-    bool slow = slow_adc_report_enabled();          // 2026-11-04: {F}{R}{S}{T} slow ADC fields, see slow_adc.h
+    // 2026-11-04: {F}{R}{S}{T} slow ADC fields, see slow_adc.h. 2026-11-10: not sent while TX is off ({D}) AND the
+    // level is {L0} (user request) - the readings keep running underneath, only the serial output stops.
+    bool slow = slow_adc_report_enabled() && !tx_report_idle();
     if (mode == INSTR_OFF && !slow) return;
     uint32_t now = millis();
     if ((uint32_t)(now - s_last_ms) < (uint32_t)INSTRUMENTATION_PERIOD_MS) return;
