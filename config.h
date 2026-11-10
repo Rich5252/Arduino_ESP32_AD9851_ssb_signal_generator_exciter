@@ -764,7 +764,7 @@
 // 25 degC with the NTC values below.
 #define SLOW_ADC_DUMMY_FWD_MV     300.0f
 #define SLOW_ADC_DUMMY_REV_MV     60.0f
-#define SLOW_ADC_DUMMY_TEMP_MV    1634.0f
+#define SLOW_ADC_DUMMY_TEMP_MV    1701.0f
 // Read all three channels back to back every BURST_PERIOD, average AVG_BURSTS bursts (125 ms x 2 = 250 ms = one
 // report). 8 bursts/s = 24 reads/s; the Nano requirement is >= 2 samples/s per channel.
 #define SLOW_ADC_BURST_PERIOD_MS  125
@@ -785,7 +785,7 @@
 #define SLOW_ADC_FWD_SCALE        1.0f
 #define SLOW_ADC_REV_SCALE        1.0f
 #define SLOW_ADC_NTC_SUPPLY_V     3.3f   // NTC to ground, pull-up to this rail
-#define SLOW_ADC_NTC_PULLUP_OHM   51000.0f
+#define SLOW_ADC_NTC_PULLUP_OHM   47000.0f   // 2026-11-10: 47k to 3V3 on the user's board (Nano: 51k)
 #define SLOW_ADC_NTC_R0_OHM       50000.0f
 #define SLOW_ADC_NTC_BETA         3950.0f
 

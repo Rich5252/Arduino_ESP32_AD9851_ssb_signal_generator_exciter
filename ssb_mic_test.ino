@@ -1609,6 +1609,7 @@ void loop()
     digitalWrite(TIMING_DEBUG_GPIO_CMD, HIGH);
 #endif
     handle_serial_commands();
+    tx_control_service();        // 2026-11-10 mic PTT debounce + T/R sequencing (tx_control.h), every loop (~10 ms)
 #if TIMING_DEBUG_ENABLED && CMD_DEBUG_PIN_ENABLED
     digitalWrite(TIMING_DEBUG_GPIO_CMD, LOW);
 #endif

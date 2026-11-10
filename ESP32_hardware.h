@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * ESP32_hardware.h  (2026-11-05)
+ * ESP32_hardware.h  (2026-11-05; pin moves by the user 2026-11-10)
  *
  * One place for every GPIO this firmware uses, the pins reserved for planned work, and the pins to keep clear of
  * (with the reason, briefly). Pin NUMBERS live here only; the code that drives a pin, and the long history of why
@@ -21,9 +21,11 @@
  *   GPIO 10   AD9851 DATA
  *   GPIO 11   AD9851 FQ_UD
  *   GPIO 12   AD9851 W_CLK
- *   GPIO 14   slow ADC FWD power, ADC2 channel 3                          slow_adc.cpp
- *   GPIO 15   slow ADC REV power, ADC2 channel 4
- *   GPIO 16   slow ADC PA temperature (NTC), ADC2 channel 5
+ *   GPIO  1   KeyIn (Nano name), active low, pull-up - reserved, no code yet
+ *   GPIO  7   MicPTTin, active low, pull-up - reserved, no code yet (next to the mic input GPIO6)
+ *   GPIO 14   slow ADC PA temperature (NTC, 47k pull-up to 3V3), ADC2 channel 3   slow_adc.cpp
+ *   GPIO 15   slow ADC FWD power, ADC2 channel 4
+ *   GPIO 16   slow ADC REV power, ADC2 channel 5
  *   GPIO 19   USB D-  (USB-CDC serial to the PC / SDR plugin)             not configurable
  *   GPIO 20   USB D+
  *   GPIO 40   TXout (Nano name): antenna relay + local 2 W PA power, ACTIVE HIGH (high = TX on), {U}/{D}
@@ -35,13 +37,14 @@
  *   GPIO 44   header RX: UART0 RX, claimed by the same UART but nothing is read (modules never talk back)
  *
  * ---- Reserved for the TXlink port (no code uses them yet) - TXlink4_Nano names where the Nano had the pin -------
- *   KeyIn     pin not chosen yet     input, active low, pull-up (Nano D8)
- *   GPIO 41   MicPTTin               input, active low, pull-up (new, no Nano equivalent)
+ *   GPIO  1   KeyIn                  input, active low, pull-up (Nano D8)            (assigned 2026-11-10)
+ *   GPIO  7   MicPTTin               input, active low, pull-up (new, no Nano equivalent)
+ *   GPIO 41   ExtPAout               external (remote) PA PTT, active high (Nano D4)
  *   GPIO 42   FanPin                 PA fan out, active high (Nano D10, on/off there; PWM here needs its own LEDC
  *                                    timer - timer 0 belongs to the RSET PWM)
- *   GPIO 47   ExtPAout               external (remote) PA PTT, active high (Nano D4)
- *   GPIO 48   free (was "local PA TX-on", which is TXout - 2026-11-06)
- *   Fit ~10k pull-downs on 40/42/47 so TXout, the fan and the external PA are off during reset/boot.
+ *   GPIO 47, 48  free (48 was "local PA TX-on", which is TXout - 2026-11-06)
+ *   Inputs on 1/7: external 4.7-10k pull-up to 3V3 (never 5 V) and ~1k series + 10-100 nF to GND at the pin.
+ *   Fit ~10k pull-downs on 40/41/42 so TXout, the external PA and the fan are off during reset/boot.
  *   Nano pins with no pin here: KeyOut (D7, RF on via the DDS level shaper) and TXlevelPin (D5, PWM DDS level) -
  *   on the ESP32 RF on/off and level are done in firmware (DDS + RSET envelope PWM on GPIO2).
  *   40-42 are the JTAG MTDO/MTDI/MTMS pins: free while pad JTAG is not used (USB-JTAG is on 19/20).
@@ -62,7 +65,7 @@
  *   (GPIO 43/44 are in use as the module link above; 44 must not be driven by a 5 V signal.)
  *
  * ---- Spare (not used, not on the avoid list) -----------------------------------------------------------------
- *   1, 7, 8 (ADC1 - analogue or slow signals only), 17, 18 (ADC2), 21, 38. Also 4/5/39 if the debug pins go.
+ *   8 (ADC1 - analogue or slow signals only), 17, 18 (ADC2), 21, 38, 47, 48. Also 4/5/39 if the debug pins go.
  *   Check the board actually brings each one out.
  *
  * ---- Other on-chip resources claimed ---------------------------------------------------------------------------
@@ -84,9 +87,9 @@
 #define RSET_MOD_LEDC_GPIO        2
 
 // ---- Slow ADC inputs (ADC2) - only ADC2 pins are accepted, see slow_adc.h ----
-#define SLOW_ADC_FWD_GPIO         15     // ADC2 ch3
-#define SLOW_ADC_REV_GPIO         16     // ADC2 ch4
-#define SLOW_ADC_TEMP_GPIO        14     // ADC2 ch5
+#define SLOW_ADC_FWD_GPIO         15     // ADC2 ch4
+#define SLOW_ADC_REV_GPIO         16     // ADC2 ch5
+#define SLOW_ADC_TEMP_GPIO        14     // ADC2 ch3
 
 // ---- Timing debug pins (TIMING_DEBUG_ENABLED and friends in config.h) ----
 #define TIMING_DEBUG_GPIO         4      // dsp_task busy window
@@ -97,8 +100,8 @@
 #define TXOUT_GPIO                40     // TXout, active high (high = TX on)
 
 // ---- TXlink port, reserved (not used by any code yet); Nano names ----
-#define KEYIN_GPIO                1     // Nano KeyIn, active low - pin not chosen yet
-#define MIC_PTT_IN_GPIO           7     // new, active low
+#define KEYIN_GPIO                1      // Nano KeyIn, active low
+#define MIC_PTT_IN_GPIO           7      // new, active low
 #define FANPIN_GPIO               42     // Nano FanPin, active high
 #define EXTPAOUT_GPIO             41     // Nano ExtPAout, external PA PTT, active high
 
@@ -106,8 +109,8 @@
 #define MODULE_LINK_TX_GPIO       43
 #define MODULE_LINK_RX_GPIO       44     // claimed by the UART, unused
 
-// ---- MCP4725 I2C DAC: NOT FITTED. Only used when MCP4725_I2C_ENABLED is 1 (config.h), and then SDA would clash
-// with ExtPAout on 47 (config.h refuses to build that combination). ----
+// ---- MCP4725 I2C DAC: NOT FITTED. Only used when MCP4725_I2C_ENABLED is 1 (config.h); config.h refuses to build if
+// these pins clash with TXout or ExtPAout. ----
 #define MCP4725_SDA_GPIO          47
 #define MCP4725_SCL_GPIO          48
 

@@ -60,7 +60,7 @@ int main()
         check(near(slow_adc_rev_watts((float)v, 14200000u, &nano_like), nano_ref(counts, 14200000ul), 2e-4), msg);
         snprintf(msg, sizeof msg, "rev at %.4f V, 50 MHz", v);
         check(near(slow_adc_rev_watts((float)v, 50313000u, &nano_like), nano_ref(counts, 50313000ul), 2e-4), msg);
-        if (v > 0.05 && v < 4.9) {
+        if (v > 0.05 && v < 4.55) {
             snprintf(msg, sizeof msg, "ntc at %.4f V", v);
             check(near(slow_adc_ntc_degc((float)v, &nano_like), nano_ntc(counts), 1e-3), msg);
         }
@@ -72,9 +72,9 @@ int main()
     }
 
     // ESP32 defaults (config.h): 3.3 V NTC rail, dummy pin voltages -> the values documented there.
-    slow_adc_conv_cfg_t esp = { 1.0f, 1.0f, 3.3f, 51000.0f, 50000.0f, 3950.0f };
+    slow_adc_conv_cfg_t esp = { 1.0f, 1.0f, 3.3f, 47000.0f, 50000.0f, 3950.0f };
     slow_adc_reading_t r;
-    slow_adc_convert(0.300f, 0.060f, 1.634f, 14200000u, &esp, &r);
+    slow_adc_convert(0.300f, 0.060f, 1.701f, 14200000u, &esp, &r);
     printf("dummy defaults -> fwd %.3f W, rev %.4f W, SWR %.3f, temp %.3f degC\n", r.fwd_w, r.rev_w, r.swr, r.temp_c);
     check(r.fwd_w > 1.6f && r.fwd_w < 2.0f, "dummy fwd about 1.8 W");
     check(r.rev_w > 0.05f && r.rev_w < 0.12f, "dummy rev about 0.08 W");
@@ -82,6 +82,8 @@ int main()
     check(fabsf(r.temp_c - 25.0f) < 0.6f, "dummy temp about 25 degC");
     check(slow_adc_ntc_degc(0.0f, &esp) == -99.0f, "ntc shorted -> -99");
     check(slow_adc_ntc_degc(3.3f, &esp) == -99.0f, "ntc open -> -99");
+    check(slow_adc_ntc_degc(3.10f, &esp) == -99.0f, "ntc open as the ADC sees it (3.1 V cap) -> -99");
+    check(slow_adc_ntc_degc(3.00f, &esp) > -25.0f && slow_adc_ntc_degc(3.00f, &esp) < -10.0f, "3.00 V still a reading (cold)");
 
     // Formatter
     char buf[64];

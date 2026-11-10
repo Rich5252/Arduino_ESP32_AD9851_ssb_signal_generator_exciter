@@ -23,6 +23,7 @@ esp_err_t dsp_state_init(const ssb_dsp_config_t *cfg);
 ssb_dsp_handle_t IRAM_ATTR dsp_state_get_ssb(void);
 
 ssb_sideband_t IRAM_ATTR dsp_state_get_sideband(void);
+void dsp_state_set_sideband(ssb_sideband_t sb);   // 2026-11-10, {M32}/{M64} (tx_control.cpp)
 
 audio_source_t IRAM_ATTR dsp_state_get_audio_source(void);
 void dsp_state_set_audio_source(audio_source_t src);

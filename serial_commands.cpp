@@ -334,9 +334,28 @@ static void brace_run_command(const brace_cmd_t *cmd)
                 break;
             }
             tx_request_set(cmd->letter == 'U');
-            serial_reply("-> TX %s, TXout %s (GPIO%d %s)%s\r\n", tx_request_get() ? "requested" : "off",
-                          tx_out_get() ? "ON" : "OFF", TXOUT_GPIO, tx_out_get() ? "high" : "low",
-                          (tx_request_get() && !tx_local_pa_active()) ? " - held off: L is negative (diagnostic mode)" : "");
+            serial_reply("-> TX %s, mode %s, state %s, TXout %s%s%s\r\n", tx_request_get() ? "requested" : "off",
+                          tx_mode_name(tx_mode_get()), tx_seq_state_name(), tx_out_get() ? "ON" : "OFF",
+                          (tx_request_get() && tx_mode_is_voice(tx_mode_get()) && !tx_ptt_pressed()) ? " - waiting for mic PTT" : "",
+                          (tx_request_get() && !tx_local_pa_active()) ? " - TXout held off: L is negative (diagnostic mode)" : "");
+            break;
+        }
+        case 'M': {
+            // 2026-11-10 {Mn}: TX mode (tx_control.h). Nano digital modes 1/2/4/8/16 are accepted ({U} keys directly);
+            // 32 USB, 64 LSB, 128 Tune (two-tone) are voice modes: {U} + mic PTT keys TX, and the sideband / audio
+            // source follow the mode. Strict parse: 1-4 digits, else refused and the mode left unchanged.
+            const char *a = cmd->arg;
+            int i = 0, val = 0;
+            while (a[i] >= '0' && a[i] <= '9' && i < 5) { val = val * 10 + (a[i] - '0'); i++; }
+            if (i == 0 || i > 4 || a[i] != 0) {
+                serial_reply("-> {M} needs a mode number (32 USB, 64 LSB, 128 Tune; Nano 1/2/4/8/16). Received '%s' - "
+                              "mode unchanged (%d %s)\r\n", a, tx_mode_get(), tx_mode_name(tx_mode_get()));
+                break;
+            }
+            tx_mode_set(val);
+            serial_reply("-> mode M%d %s: %s, state %s, TXout %s\r\n", val, tx_mode_name(val),
+                          tx_mode_is_voice(val) ? "{U} + mic PTT keys TX" : "{U} keys TX directly (mode not generated here)",
+                          tx_seq_state_name(), tx_out_get() ? "ON" : "OFF");
             break;
         }
         case 'L': {
@@ -360,7 +379,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, L = level %%)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%)\r\n", cmd->letter);
             break;
     }
 }

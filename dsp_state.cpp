@@ -40,6 +40,11 @@ audio_source_t IRAM_ATTR dsp_state_get_audio_source(void)
     return s_audio_source;
 }
 
+void dsp_state_set_sideband(ssb_sideband_t sb)
+{
+    s_sideband = sb;   // dsp_task reads it fresh every tick; LSB just negates the frequency deviation (ssb_dsp.c)
+}
+
 void dsp_state_set_audio_source(audio_source_t src)
 {
     s_audio_source = src;

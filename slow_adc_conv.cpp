@@ -46,7 +46,10 @@ float slow_adc_swr(float fwd_w, float rev_w)
 float slow_adc_ntc_degc(float pin_v, const slow_adc_conv_cfg_t *cfg)
 {
     // NTC from the pin to ground, pull-up from the pin to ntc_supply_v: R = Rpull * V / (Vsup - V).
-    if (pin_v <= 0.001f || pin_v >= cfg->ntc_supply_v - 0.001f) return -99.0f;   // shorted / open
+    // Open sensor: the pin sits at the rail, but the ADC (12 dB atten.) tops out near 3.1 V, so "at the rail" can
+    // never be seen exactly - treat anything above 92 % of the supply (3.04 V at 3.3 V; NTC above ~11x the pull-up,
+    // i.e. below about -30 degC for 50k/3950) as open. Shorted: below 1 mV.
+    if (pin_v <= 0.001f || pin_v >= 0.92f * cfg->ntc_supply_v) return -99.0f;
     float r = cfg->ntc_pullup_ohm * pin_v / (cfg->ntc_supply_v - pin_v);
     // Same constants as the Nano's calcNTC() (T0 = 298 K, 273 offset), so readings compare directly.
     float t = 1.0f / ((1.0f / 298.0f) + (1.0f / cfg->ntc_beta) * logf(r / cfg->ntc_r0_ohm));
