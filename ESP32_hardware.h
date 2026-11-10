@@ -82,6 +82,11 @@
 #define AD9851_PIN_DATA           10
 #define AD9851_PIN_FQUD           11
 #define AD9851_PIN_WCLK           12
+// The AD9851 control lines go through INVERTING BS170 stages (AD9851.c, AD9851_INVERTING_LEVEL_SHIFT): GPIO9 LOW =
+// AD9851 RESET asserted (DDS held at 0 Hz, no RF). Used by tx_control.cpp to hold the DDS off early in setup() and in
+// the reboot shutdown handler. A ~100k gate-to-GND pull-down on that BS170 does the same while the ESP32 is in
+// reset / being flashed (no firmware running).
+#define AD9851_RESET_ASSERT_LEVEL 0
 
 // ---- Envelope (RSET) PWM out ----
 #define RSET_MOD_LEDC_GPIO        2

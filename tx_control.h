@@ -5,6 +5,12 @@
  *
  * TX switching, mode, mic PTT, CW key, output level - the TXlink TX control port.
  *
+ * ---- Safe states (2026-11-10) ----
+ * tx_control_init() (first line of setup()) forces TXout and ExtPAout low, holds the AD9851 in reset and pulls the
+ * envelope PWM pin low before anything else runs; a shutdown handler does the same on esp_restart() ('b' reboot).
+ * Neither can act during a USB flash or a panic/watchdog reset - only external pull resistors cover those
+ * (10k pull-downs on TXout 40 / ExtPAout 41, ~100k gate pull-down on the AD9851 RESET BS170).
+ *
  * ---- Where it runs ----
  * The whole sequencer runs in dsp_task (Core 0) once per full tick (20 kHz, tx_control_tick()), so key/PTT timing is
  * sample-accurate and nothing extra runs periodically on Core 1. The command side ({U} {D} {M} {L} {H} {E}) only

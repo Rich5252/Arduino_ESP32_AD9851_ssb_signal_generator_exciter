@@ -11,6 +11,10 @@
 #include <stdlib.h>
 #include <math.h>
 #include "soc/gpio_reg.h"
+#include "soc/gpio_sig_map.h"
+#include "driver/gpio.h"
+#include "esp_rom_gpio.h"
+#include "esp_system.h"
 
 #ifndef TX_LEVEL_SLEW_MS
 #define TX_LEVEL_SLEW_MS          5.0f   // ms for a full-scale level change ({L})
@@ -69,6 +73,7 @@ static float          s_edge_pos = 0.0f;  // 0..1 along the edge curve
 static float          s_level_scale = 0.0f;
 static float          s_scale = 0.0f;
 static bool           s_cw_carrier = false;
+static volatile bool  s_shutdown = false;  // set by the reboot shutdown handler: TX forced off for good
 
 // ---- tick -> loop messages ----
 static volatile uint32_t s_msg_tx_on = 0, s_msg_tx_off = 0, s_msg_ptt = 0, s_msg_key = 0, s_msg_kf_ovf = 0;
@@ -87,7 +92,9 @@ static inline bool gpio_in(int pin)
 static void write_txout(bool on)
 {
     if (on == s_tx_on) return;
-    digitalWrite(TXOUT_GPIO, on ? HIGH : LOW);                  // active high: HIGH = TX on
+    // IDF call, not digitalWrite(): the pin is set up with plain IDF GPIO calls in force_safe_outputs(), and the
+    // Arduino core's digitalWrite() refuses pins its peripheral manager has not seen pinMode() on.
+    gpio_set_level((gpio_num_t)TXOUT_GPIO, on ? 1u : 0u);       // active high: 1 = TX on
     s_tx_on = on;
 }
 
@@ -100,11 +107,44 @@ static void set_state(tx_seq_state_t st)
     if (old != TX_SEQ_RX && st == TX_SEQ_RX) s_msg_tx_off = s_msg_tx_off + 1;
 }
 
+// Drive every TX-related output to its safe level with plain IDF GPIO calls (no Arduino peripheral manager), taking
+// a pin back from LEDC / any peripheral first. Used at the top of setup() and in the reboot shutdown handler.
+static void drive_low_as_gpio(int pin, int level)
+{
+    if (pin < 0) return;
+    esp_rom_gpio_connect_out_signal((uint32_t)pin, SIG_GPIO_OUT_IDX, false, false);   // detach LEDC etc.
+    gpio_set_level((gpio_num_t)pin, (uint32_t)level);
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)pin, (uint32_t)level);
+}
+
+static void force_safe_outputs(void)
+{
+    drive_low_as_gpio(TXOUT_GPIO, 0);                           // relay to RX, local PA power off
+    drive_low_as_gpio(EXTPAOUT_GPIO, 0);                        // external PA PTT off (pin reserved, not used yet)
+#if AD9851_ATTACHED
+    drive_low_as_gpio(AD9851_PIN_RESET, AD9851_RESET_ASSERT_LEVEL);   // DDS held in reset: 0 Hz, no RF
+#endif
+    drive_low_as_gpio(RSET_MOD_LEDC_GPIO, 0);                   // envelope PWM node to 0 (BS170 gate off)
+    s_tx_on = false;
+}
+
+// esp_restart() (the 'b' command, OTA, ...) calls this before resetting. NOT called on a panic / watchdog reset or
+// when the USB hardware resets the chip for flashing - the hardware pull resistors cover those.
+static void tx_shutdown_handler(void)
+{
+    s_shutdown = true;
+    s_requested = false;
+    force_safe_outputs();
+}
+
 void tx_control_init(void)
 {
-    digitalWrite(TXOUT_GPIO, LOW);                              // latch low before it becomes an output
-    pinMode(TXOUT_GPIO, OUTPUT);
-    digitalWrite(TXOUT_GPIO, LOW);
+    // 2026-11-10: very first thing in setup(): TXout off, external PA off, DDS held in reset, envelope node low - so
+    // nothing left over from before the reset (the AD9851 keeps its last frequency on its own clock) can transmit
+    // while setup() runs. carrier_output_init() later releases the DDS reset as part of its normal init.
+    force_safe_outputs();
+    esp_register_shutdown_handler(tx_shutdown_handler);
 #if MIC_PTT_IN_GPIO >= 0
     pinMode(MIC_PTT_IN_GPIO, INPUT_PULLUP);
 #endif
@@ -118,12 +158,12 @@ void tx_control_init(void)
     }
     s_edge_lut[0] = 0.0f;
     s_edge_lut[EDGE_LUT_N] = 1.0f;
-    s_tx_on = false;
     s_state = TX_SEQ_RX;
 }
 
 bool IRAM_ATTR tx_control_tick(void)
 {
+    if (s_shutdown) { s_gate = false; return false; }          // rebooting: outputs already forced safe, leave them
     s_tick++;
     const uint32_t now = s_tick;
     const int mode = s_mode;
