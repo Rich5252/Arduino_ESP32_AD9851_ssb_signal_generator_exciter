@@ -84,9 +84,9 @@
 #define RSET_MOD_LEDC_GPIO        2
 
 // ---- Slow ADC inputs (ADC2) - only ADC2 pins are accepted, see slow_adc.h ----
-#define SLOW_ADC_FWD_GPIO         14     // ADC2 ch3
-#define SLOW_ADC_REV_GPIO         15     // ADC2 ch4
-#define SLOW_ADC_TEMP_GPIO        16     // ADC2 ch5
+#define SLOW_ADC_FWD_GPIO         15     // ADC2 ch3
+#define SLOW_ADC_REV_GPIO         16     // ADC2 ch4
+#define SLOW_ADC_TEMP_GPIO        14     // ADC2 ch5
 
 // ---- Timing debug pins (TIMING_DEBUG_ENABLED and friends in config.h) ----
 #define TIMING_DEBUG_GPIO         4      // dsp_task busy window
@@ -97,10 +97,10 @@
 #define TXOUT_GPIO                40     // TXout, active high (high = TX on)
 
 // ---- TXlink port, reserved (not used by any code yet); Nano names ----
-#define KEYIN_GPIO                -1     // Nano KeyIn, active low - pin not chosen yet
-#define MIC_PTT_IN_GPIO           41     // new, active low
+#define KEYIN_GPIO                1     // Nano KeyIn, active low - pin not chosen yet
+#define MIC_PTT_IN_GPIO           7     // new, active low
 #define FANPIN_GPIO               42     // Nano FanPin, active high
-#define EXTPAOUT_GPIO             47     // Nano ExtPAout, external PA PTT, active high
+#define EXTPAOUT_GPIO             41     // Nano ExtPAout, external PA PTT, active high
 
 // ---- Module link: UART0 to the filter/ATU modules (module_link.cpp), board header TX/RX ----
 #define MODULE_LINK_TX_GPIO       43
