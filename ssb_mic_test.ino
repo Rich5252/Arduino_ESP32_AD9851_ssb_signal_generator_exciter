@@ -873,6 +873,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // Reading it once here removes that theoretical split-brain
         // window; deliberate, called out here since everything else in
         // this refactor is a verbatim move.
+        // 2026-11-10 TX sequencer (tx_control.h): key/PTT inputs, T/R sequencing, RF gate - sample-accurate, every
+        // full tick. Returns true in CW mode: this tick sends a steady carrier (injected after soft-limit below).
+        const bool cw_carrier = tx_control_tick();
         audio_source_t src = dsp_state_get_audio_source();
 
         float sample;
@@ -978,6 +981,12 @@ static void IRAM_ATTR dsp_task(void* arg)
         // as gdeq/ampeq above): each function itself no-ops when disabled.
         envelope = envelope_alc_process(envelope);
         envelope = envelope_softlimit_process(envelope);
+        if (cw_carrier) {
+            // CW (tx_control.h): steady carrier at the carrier frequency, envelope = 100 %; keying edges and {L} are
+            // applied by tx_level_apply() just below. The DSP above still runs so its filter state stays warm.
+            freq_dev_hz = 0.0f;
+            envelope = 1.0f;
+        }
         // {A} RF-envelope level meter tap (instrumentation.h): last point before predistort/PWM mapping, so 0 dB = 1.0
         // at the predistort LUT input. One fabsf + multiply + compares; no Serial on this path.
         instrumentation_record_envelope(envelope);
@@ -1609,7 +1618,7 @@ void loop()
     digitalWrite(TIMING_DEBUG_GPIO_CMD, HIGH);
 #endif
     handle_serial_commands();
-    tx_control_service();        // 2026-11-10 mic PTT debounce + T/R sequencing (tx_control.h), every loop (~10 ms)
+    tx_control_service();        // 2026-11-10 prints {M}/{N} and PTT messages flagged by the DSP-tick sequencer (tx_control.h)
 #if TIMING_DEBUG_ENABLED && CMD_DEBUG_PIN_ENABLED
     digitalWrite(TIMING_DEBUG_GPIO_CMD, LOW);
 #endif

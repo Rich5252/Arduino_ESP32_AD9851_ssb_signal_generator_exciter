@@ -23,6 +23,7 @@
 #include "slow_adc.h"
 #include "module_link.h"
 #include "tx_control.h"
+#include <stdlib.h>
 #if AD9851_ATTACHED
 #include "relative_delay.h"
 #include "carrier_output.h"
@@ -325,18 +326,21 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         case 'U':
         case 'D': {
-            // 2026-11-06 {U}/{D}: TX requested / not requested (tx_control.h). TXout (GPIO40, active high) =
-            // requested AND LocalPAactive ({L} >= 0). The rest of the Nano's {U}/{D} behaviour is not ported yet.
-            // An argument is refused so a garbled command cannot key the transmitter.
+            // 2026-11-06/10 {U}/{D}: TX requested / not requested (tx_control.h). Whether TX starts depends on {M}:
+            // voice modes also need the mic PTT, CW the key, digital modes key on {U} alone. TXout is held off while
+            // {L} is negative. An argument is refused so a garbled command cannot key the transmitter.
             if (cmd->arg[0] != 0) {
                 serial_reply("-> {%c} takes no argument - ignored, TXout stays %s. Received argument '%s'\r\n",
                               cmd->letter, tx_out_get() ? "ON" : "OFF", cmd->arg);
                 break;
             }
             tx_request_set(cmd->letter == 'U');
+            delay(2);   // let the DSP-tick sequencer act (it runs every 50 us) so the reply shows the new state
+            bool wait_ptt = tx_request_get() && tx_mode_is_voice(tx_mode_get()) && !tx_ptt_pressed();
+            bool wait_key = tx_request_get() && tx_mode_get() == TX_MODE_CW && !tx_key_down();
             serial_reply("-> TX %s, mode %s, state %s, TXout %s%s%s\r\n", tx_request_get() ? "requested" : "off",
                           tx_mode_name(tx_mode_get()), tx_seq_state_name(), tx_out_get() ? "ON" : "OFF",
-                          (tx_request_get() && tx_mode_is_voice(tx_mode_get()) && !tx_ptt_pressed()) ? " - waiting for mic PTT" : "",
+                          wait_ptt ? " - waiting for mic PTT" : wait_key ? " - waiting for key" : "",
                           (tx_request_get() && !tx_local_pa_active()) ? " - TXout held off: L is negative (diagnostic mode)" : "");
             break;
         }
@@ -353,9 +357,42 @@ static void brace_run_command(const brace_cmd_t *cmd)
                 break;
             }
             tx_mode_set(val);
+            delay(2);
             serial_reply("-> mode M%d %s: %s, state %s, TXout %s\r\n", val, tx_mode_name(val),
-                          tx_mode_is_voice(val) ? "{U} + mic PTT keys TX" : "{U} keys TX directly (mode not generated here)",
+                          tx_mode_is_voice(val) ? "{U} + mic PTT keys TX" :
+                          val == TX_MODE_CW ? "{U} + key keys TX (carrier, edges {E}, hold {H})" :
+                                              "{U} keys TX directly (mode not generated here)",
                           tx_seq_state_name(), tx_out_get() ? "ON" : "OFF");
+            break;
+        }
+        case 'H': {
+            // 2026-11-10 {Hn}: CW TX hold, ms after the last key-up before TXout drops (Nano TXholdTime). 0..5000;
+            // never shorter than relay delay + RF edge + margin (enforced in the tick).
+            const char *a = cmd->arg;
+            int i = 0, val = 0;
+            while (a[i] >= '0' && a[i] <= '9' && i < 5) { val = val * 10 + (a[i] - '0'); i++; }
+            if (i == 0 || i > 4 || a[i] != 0) {
+                serial_reply("-> {H} needs a whole number of ms (0-5000). Received '%s' - hold unchanged at %d ms\r\n",
+                              a, tx_hold_get_ms());
+                break;
+            }
+            tx_hold_set_ms(val);
+            serial_reply("-> CW TX hold %d ms%s\r\n", tx_hold_get_ms(), val > 5000 ? " (clamped)" : "");
+            break;
+        }
+        case 'E': {
+            // 2026-11-10 {En}: RF edge (rise/fall) time in ms, Gaussian (erf) shape, decimals allowed. 0.5..20.
+            const char *a = cmd->arg;
+            char *end = nullptr;
+            float v = strtof(a, &end);
+            if (a[0] == 0 || end == a || *end != 0 || !(v >= 0.0f) || v > 1000.0f) {
+                serial_reply("-> {E} needs a time in ms (0.5-20, e.g. 5 or 2.5). Received '%s' - edge unchanged at %.1f ms\r\n",
+                              a, tx_edge_get_ms());
+                break;
+            }
+            tx_edge_set_ms(v);
+            serial_reply("-> RF edge %.2f ms (Gaussian)%s\r\n", tx_edge_get_ms(),
+                          (v < 0.5f || v > 20.0f) ? " (clamped to 0.5-20)" : "");
             break;
         }
         case 'L': {
@@ -379,7 +416,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms)\r\n", cmd->letter);
             break;
     }
 }
