@@ -735,6 +735,15 @@
 // the ADC range) -> off.
 // Boot state below: 0 = off (keeps bench serial logs clean), 1 = RF envelope, 2 = ADC output.
 #define INSTRUMENTATION_DEFAULT_MODE    0
+// 2026-11-11 quiet boot (TXlink-like): all periodic diagnostics start MUTED. 'v' unmutes the status line / 1 s
+// blocks / null_bias block (and the "-> mic PTT" messages), 'M' the auto-dump watchers (canary, slow-trace,
+// held-freq - NOTE: their detection pauses too while muted). 'V' and the other on-demand commands work regardless.
+// Set to 0 for the old bench behaviour (everything running from boot).
+#define DIAG_MUTED_AT_BOOT          1
+#define DIAG_AUTODUMP_MUTED_AT_BOOT 1
+// Replies to brace (TXlink) commands: 0 = silent while diagnostics are muted (TXlink-compatible; the Nano never
+// replied) - errors included; 'v' brings them back for bench work; {K} always answers. 1 = always reply.
+#define BRACE_CMD_REPLIES           0
 #define INSTRUMENTATION_PERIOD_MS       250      // 4 messages per second
 // {A} meter ballistics: instant attack, then falls at this rate. 15 dB/s takes 0 dB to -30 dB in 2 s. Reasoned
 // starting value, not a tuned one.
@@ -806,6 +815,16 @@
 #define TEMP_TRIP_ENABLED         1
 #define TEMP_TRIP_DEFAULT_C       54       // Nano TxMaxTemp
 #define TEMP_TRIP_ON_SENSOR_FAULT 1        // open/shorted NTC (reads -99) also trips; 0 = ignore sensor faults
+// PA fan (2026-11-11, fan_control.h): Nano CheckFanState() port. Full while TX, then {R} low speed for {B} minutes,
+// full while the PA is above FAN_HIGH_TEMP_C. PWM frequency: 25 kHz is the PC 4-wire-fan standard and keeps the
+// fan's supply-current ripple (and any coupling into the PA/exciter) well outside the SSB passband; the Nano ran
+// ~490 Hz. A 2/3-wire fan switched by a MOSFET may prefer a much lower frequency (tens of Hz) - check the fan /
+// driver, and A/B the spectrum with the fan off / low / full.
+#define FAN_PWM_HZ                25000
+#define FAN_HIGH_TEMP_C           38.0f    // Nano FanHighTemp
+#define FAN_LOW_PWM_DEFAULT       150      // Nano FanLowPWM, {R} 0..255
+#define FAN_HOLD_MIN_DEFAULT      3        // Nano FanHoldTime 3 min, {B} minutes
+#define FAN_KICK_MS               500      // full speed this long when starting from off
 
 // Worst-case timing diagnostics period, shared by diagnostics.cpp - one
 // sample period in microseconds.

@@ -23,6 +23,7 @@
 #include "slow_adc.h"
 #include "module_link.h"
 #include "tx_control.h"
+#include "fan_control.h"
 #include <stdlib.h>
 #if AD9851_ATTACHED
 #include "relative_delay.h"
@@ -75,8 +76,13 @@
 // digit-width change (e.g. a different ENVELOPE_INTERP_FACTOR), or any
 // other command's variable-length numeric field can silently
 // reintroduce this same bug somewhere else in this file.
+// 2026-11-11: TXlink-compatible quiet replies. The Nano never answered brace commands; the user's SDRuno plugin
+// expects only protocol traffic. While this is set, serial_reply() prints nothing (see brace_handle_char()).
+static bool s_reply_suppressed = false;
+
 static void serial_reply(const char *fmt, ...)
 {
+    if (s_reply_suppressed) return;
     // 2026-09-02: bumped 256 -> 512 - the 'w' reply (serial_commands.cpp's
     // AUDIO_SRC_CHIRP handler) grew to ~500 bytes once it started reporting
     // 'g' state too, real hardware confirmed this silently TRUNCATED the
@@ -312,6 +318,11 @@ static void brace_run_command(const brace_cmd_t *cmd)
                 char st[480];
                 slow_adc_format_status(st, sizeof st);
                 serial_reply("-> slow ADC status:\r\n%s", st);
+                serial_reply("->   TX: mode %s, state %s, TXout %s, level L%d; external PA %s, P%d, ExtPAout %s; "
+                              "fan duty %d/255 (low %d, hold %d min)\r\n",
+                              tx_mode_name(tx_mode_get()), tx_seq_state_name(), tx_out_get() ? "ON" : "off",
+                              tx_level_get(), tx_extpa_get_on() ? "ON" : "off", tx_extpa_get_level(),
+                              tx_extpa_out_get() ? "ON" : "off", fan_get_duty(), fan_get_low_pwm(), fan_get_hold_min());
             } else if ((cmd->arg[0] == '0' || cmd->arg[0] == '1') && cmd->arg[1] == 0) {
                 slow_adc_set_report_enabled(cmd->arg[0] == '1');
                 serial_reply("-> slow ADC report (fields F R S T) %s\r\n", slow_adc_report_enabled() ? "ON" : "OFF");
@@ -382,6 +393,61 @@ static void brace_run_command(const brace_cmd_t *cmd)
             serial_reply("-> PA temperature trip limit %d degC%s\r\n", tx_temp_max_get(), val > 150 ? " (clamped)" : "");
             break;
         }
+        case 'Q': {
+            // 2026-11-11 {Q0}/{Q1}: external PA off/on (Nano ExtPAon). On: RF level from {P} instead of {L}, and
+            // ExtPAout (EXTPAOUT_GPIO) switches with TXout during TX (only if L >= 0).
+            if ((cmd->arg[0] == '0' || cmd->arg[0] == '1') && cmd->arg[1] == 0) {
+                tx_extpa_set_on(cmd->arg[0] == '1');
+                serial_reply("-> external PA %s (level from %s)\r\n", tx_extpa_get_on() ? "ON" : "OFF",
+                              tx_extpa_get_on() ? "P" : "L");
+            } else {
+                serial_reply("-> Q needs 0 or 1. Received '%s' - external PA stays %s\r\n", cmd->arg,
+                              tx_extpa_get_on() ? "ON" : "OFF");
+            }
+            break;
+        }
+        case 'P': {
+            // 2026-11-11 {P<%>}: external PA drive level, % of envelope voltage like {L} (Nano ExtPAlevel; the Nano
+            // used its magnitude, so a sign is accepted and ignored). Used instead of L while Q1.
+            const char *a = cmd->arg;
+            int i = 0, val = 0;
+            if (a[0] == '-' || a[0] == '+') i = 1;
+            int d0 = i;
+            while (a[i] >= '0' && a[i] <= '9' && i - d0 < 5) { val = val * 10 + (a[i] - '0'); i++; }
+            if (i == d0 || i - d0 > 4 || a[i] != 0) {
+                serial_reply("-> P needs a whole number 0-100. Received '%s' - unchanged at P%d\r\n", a, tx_extpa_get_level());
+                break;
+            }
+            tx_extpa_set_level(val);
+            serial_reply("-> external PA level P%d%s\r\n", tx_extpa_get_level(), tx_extpa_get_on() ? " (in use)" : " (used when Q1)");
+            break;
+        }
+        case 'R': {
+            // 2026-11-11 {R<0-255>}: fan low-speed PWM after TX (Nano FanLowPWM, 255 = full)
+            const char *a = cmd->arg;
+            int i = 0, val = 0;
+            while (a[i] >= '0' && a[i] <= '9' && i < 4) { val = val * 10 + (a[i] - '0'); i++; }
+            if (i == 0 || i > 3 || a[i] != 0) {
+                serial_reply("-> R needs 0-255. Received '%s' - fan low PWM unchanged at %d\r\n", a, fan_get_low_pwm());
+                break;
+            }
+            fan_set_low_pwm(val);
+            serial_reply("-> fan low PWM %d/255\r\n", fan_get_low_pwm());
+            break;
+        }
+        case 'B': {
+            // 2026-11-11 {B<minutes>}: fan hold time after TX (Nano FanHoldTime, "Blower")
+            const char *a = cmd->arg;
+            int i = 0, val = 0;
+            while (a[i] >= '0' && a[i] <= '9' && i < 4) { val = val * 10 + (a[i] - '0'); i++; }
+            if (i == 0 || i > 3 || a[i] != 0) {
+                serial_reply("-> B needs whole minutes 0-120. Received '%s' - fan hold unchanged at %d min\r\n", a, fan_get_hold_min());
+                break;
+            }
+            fan_set_hold_min(val);
+            serial_reply("-> fan hold %d min\r\n", fan_get_hold_min());
+            break;
+        }
         case 'H': {
             // 2026-11-10 {Hn}: CW TX hold, ms after the last key-up before TXout drops (Nano TXholdTime). 0..5000;
             // never shorter than relay delay + RF edge + margin (enforced in the tick).
@@ -433,30 +499,45 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms, T = PA temp limit degC)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms, T = PA temp limit degC, Q/P = external PA on/level, R/B = fan low PWM / hold min)\r\n", cmd->letter);
             break;
     }
 }
 
 // Returns true if the character was consumed by the brace parser (do not treat it as a single-key command).
+// 2026-11-11: brace-command replies (confirmations AND errors) are silent unless BRACE_CMD_REPLIES is 1 or the
+// diagnostics are unmuted ('v'); {K} is an explicit status query and always answers.
+static bool brace_replies_quiet(char letter)
+{
+#if BRACE_CMD_REPLIES
+    (void)letter;
+    return false;
+#else
+    return diagnostics_get_muted() && letter != 'K';
+#endif
+}
+
 static bool brace_handle_char(char c)
 {
     brace_cmd_t cmd;
+    bool handled = true;
+    s_reply_suppressed = brace_replies_quiet(0);
     switch (brace_input_feed(c, millis(), &cmd)) {
-        case BRACE_PASS:      return false;
-        case BRACE_CONSUMED:  return true;
-        case BRACE_COMMAND:   brace_run_command(&cmd); return true;
-        case BRACE_CANCELLED: serial_reply("-> brace input cancelled, single-key commands resumed\r\n"); return true;
+        case BRACE_PASS:      handled = false; break;
+        case BRACE_CONSUMED:  break;
+        case BRACE_COMMAND:   s_reply_suppressed = brace_replies_quiet(cmd.letter); brace_run_command(&cmd); break;
+        case BRACE_CANCELLED: serial_reply("-> brace input cancelled, single-key commands resumed\r\n"); break;
         case BRACE_OVERFLOW:  serial_reply("-> brace input too long (max %d characters after the letter) - discarded\r\n",
-                                            BRACE_ARG_MAX); return true;
+                                            BRACE_ARG_MAX); break;
     }
-    return true;
+    s_reply_suppressed = false;
+    return handled;
 }
 
 void handle_serial_commands(void)
 {
     if (brace_input_check_timeout(millis())) {
-        serial_reply("-> brace input timed out - discarded, single-key commands resumed\r\n");
+        if (!brace_replies_quiet(0)) serial_reply("-> brace input timed out - discarded, single-key commands resumed\r\n");
     }
     // Runtime source switch: 't' -> two-tone, 's' -> single-tone, 'm' ->
     // live mic, 'p'/'y'/'h' -> isolation tests. dsp_task reads the audio

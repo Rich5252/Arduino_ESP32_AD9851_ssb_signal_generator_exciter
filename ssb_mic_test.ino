@@ -141,6 +141,7 @@
 #include "slow_adc.h"
 #include "module_link.h"
 #include "tx_control.h"
+#include "fan_control.h"
 
 // (No TAG/ESP_LOG here - everything in this file uses Serial.printf so it's
 // visible regardless of the IDE's Core Debug Level setting. ssb_dsp.c has
@@ -1431,6 +1432,7 @@ void setup()
     init_sample_timer();
     diagnostics_init();
     slow_adc_init();             // 2026-11-04 slow ADC channels (FWD/REV/TEMP), see slow_adc.h; stub when SLOW_ADC_ENABLED 0
+    fan_control_init();          // 2026-11-11 PA fan PWM (LEDC timer 1 / ch 1 on FANPIN_GPIO), off until TX or hot
 
     Serial.printf("SSB mic test running: taps=%d fs=%uHz mode=%s ad9851=%s dac=MCP4725@0x%02X pwm_compare=%s\r\n",
              HILBERT_TAPS, SAMPLE_RATE_HZ,
@@ -1510,6 +1512,9 @@ void setup()
                   DELAY_STEP_SAMPLES, DELAY_FINE_STEP_SAMPLES);
 #endif
 #if AD9851_ATTACHED
+    // 2026-11-11: only with diagnostics unmuted - its examples ("{F14200000}") are valid protocol fields that the
+    // SDRuno plugin could take as a forward-power reading.
+    if (!diagnostics_get_muted())
     Serial.printf("Brace commands (character at a time, no CR/LF needed): send {F<Hz>} to set the carrier "
                   "frequency, e.g. {F14200000} (now %u Hz, range %u..%u Hz); {C<ppb>} sets the AD9851 clock "
                   "calibration in parts per billion, e.g. {C11408} (now %d ppb; positive raises the output; "
@@ -1619,6 +1624,7 @@ void loop()
 #endif
     handle_serial_commands();
     tx_control_service();        // 2026-11-10 prints {M}/{N} and PTT messages flagged by the DSP-tick sequencer (tx_control.h)
+    fan_control_service();       // 2026-11-11 PA fan, every 250 ms
 #if TIMING_DEBUG_ENABLED && CMD_DEBUG_PIN_ENABLED
     digitalWrite(TIMING_DEBUG_GPIO_CMD, LOW);
 #endif

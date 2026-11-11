@@ -9,7 +9,7 @@
  * tx_control_init() (first line of setup()) forces TXout and ExtPAout low, holds the AD9851 in reset and pulls the
  * envelope PWM pin low before anything else runs; a shutdown handler does the same on esp_restart() ('b' reboot).
  * Neither can act during a USB flash or a panic/watchdog reset - only external pull resistors cover those
- * (10k pull-downs on TXout 40 / ExtPAout 41, ~100k gate pull-down on the AD9851 RESET BS170).
+ * (10k pull-downs on TXout 45 / ExtPAout 46, ~100k gate pull-down on the AD9851 RESET BS170).
  *
  * ---- Where it runs ----
  * The whole sequencer runs in dsp_task (Core 0) once per full tick (20 kHz, tx_control_tick()), so key/PTT timing is
@@ -104,6 +104,18 @@ void tx_trip(const char *reason, float swr, float fwd_w, float rev_w, float rev_
 void tx_temp_max_set(int deg_c);
 int  tx_temp_max_get(void);
 uint32_t tx_trip_count(void);
+
+// {Q0/1} external PA on/off, {P<%>} external PA drive level (Nano ExtPAon / ExtPAlevel). While on, the RF level
+// is |P| instead of |L| (LocalPAactive still follows L's sign) and ExtPAout (EXTPAOUT_GPIO, active high) switches
+// with TXout - on at the start of TX if LocalPAactive, off when TX ends (same relay sequencing).
+void tx_extpa_set_on(bool on);
+bool tx_extpa_get_on(void);
+void tx_extpa_set_level(int pct);
+int  tx_extpa_get_level(void);
+bool tx_extpa_out_get(void);
+
+// Number of RX -> TX starts since boot (lets slow pollers such as the fan notice a TX shorter than their period).
+uint32_t tx_start_count(void);
 
 // true while TX is not requested ({D}) and the level is exactly {L0}: the slow-ADC {F}{R}{S}{T} serial report is
 // suppressed then (instrumentation.cpp); the ADC readings and any checks on them carry on.

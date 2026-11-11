@@ -704,7 +704,10 @@ static volatile uint32_t s_dbg_max_write_us = 0;
 static int64_t s_dsp_tick_start_us = 0;         // captured once at gptimer_start(), and again on reset
 static volatile uint32_t s_dbg_dsp_tick_count = 0;  // incremented once per dsp_task tick, unconditionally
 
-static volatile bool s_diag_muted = false;
+#ifndef DIAG_MUTED_AT_BOOT
+#define DIAG_MUTED_AT_BOOT 0
+#endif
+static volatile bool s_diag_muted = (DIAG_MUTED_AT_BOOT != 0);   // 2026-11-11: quiet boot, config.h
 
 // 2026-09-09: canary latches for the random-TX-jump investigation (see
 // moving_forward_notes.md) - 0 means "never seen a mismatch since boot/
@@ -1915,7 +1918,10 @@ void diagnostics_toggle_muted(void)
 // diagnostics_toggle_autodump_muted()) for the full rationale and the
 // "detection pauses too, not just the print" caveat. Independent of
 // s_diag_muted above by design - either can be on/off in any combination.
-static volatile bool s_diag_autodump_muted = false;
+#ifndef DIAG_AUTODUMP_MUTED_AT_BOOT
+#define DIAG_AUTODUMP_MUTED_AT_BOOT 0
+#endif
+static volatile bool s_diag_autodump_muted = (DIAG_AUTODUMP_MUTED_AT_BOOT != 0);   // 2026-11-11: quiet boot
 
 bool diagnostics_get_autodump_muted(void)
 {

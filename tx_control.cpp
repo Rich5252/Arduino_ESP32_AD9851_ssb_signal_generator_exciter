@@ -8,6 +8,7 @@
 #include "dsp_state.h"
 #include "adc_capture.h"
 #include "module_link.h"
+#include "diagnostics.h"
 #if AD9851_ATTACHED
 #include "carrier_output.h"
 #endif
@@ -52,7 +53,11 @@ static volatile bool  s_requested = false;
 static volatile int   s_level = 0;
 static volatile bool  s_local_pa = true;
 static volatile int   s_mode = TX_MODE_BOOT;
-static volatile float s_level_target = 0.0f;
+static volatile float s_level_target = 0.0f;  // |effective level| / 100 (L, or P while the external PA is on)
+static volatile int   s_l_mag = 0;              // |L|
+static volatile bool  s_extpa_on = false;       // {Q1}
+static volatile int   s_extpa_level = 0;        // {P} 0..100
+static volatile bool  s_extpa_out = false;      // ExtPAout pin state
 static volatile int   s_hold_ms = TX_HOLD_DEFAULT_MS;
 static volatile float s_edge_ms = TX_EDGE_DEFAULT_MS;
 
@@ -103,6 +108,20 @@ static inline bool gpio_in(int pin)
     return (REG_READ(GPIO_IN1_REG) >> (pin - 32)) & 1u;
 }
 
+static void write_extpaout(bool on)
+{
+    if (on == s_extpa_out) return;
+    gpio_set_level((gpio_num_t)EXTPAOUT_GPIO, on ? 1u : 0u);    // active high: 1 = external PA PTT on
+    s_extpa_out = on;
+}
+
+static void update_level_target(void)
+{
+    // Nano setDDSlevelPWM(): level = ExtPAon ? ExtPAlevel : TXlevel (magnitude); LocalPAactive stays from L's sign
+    int mag = s_extpa_on ? s_extpa_level : s_l_mag;
+    s_level_target = (float)mag / 100.0f;
+}
+
 static void write_txout(bool on)
 {
     if (on == s_tx_on) return;
@@ -135,12 +154,14 @@ static void drive_low_as_gpio(int pin, int level)
 static void force_safe_outputs(void)
 {
     drive_low_as_gpio(TXOUT_GPIO, 0);                           // relay to RX, local PA power off
-    drive_low_as_gpio(EXTPAOUT_GPIO, 0);                        // external PA PTT off (pin reserved, not used yet)
+    drive_low_as_gpio(EXTPAOUT_GPIO, 0);                        // external PA PTT off
+    drive_low_as_gpio(FANPIN_GPIO, 0);                          // fan off until fan_control_init() takes the pin
 #if AD9851_ATTACHED
     drive_low_as_gpio(AD9851_PIN_RESET, AD9851_RESET_ASSERT_LEVEL);   // DDS held in reset: 0 Hz, no RF
 #endif
     drive_low_as_gpio(RSET_MOD_LEDC_GPIO, 0);                   // envelope PWM node to 0 (BS170 gate off)
     s_tx_on = false;
+    s_extpa_out = false;
 }
 
 // esp_restart() (the 'b' command, OTA, ...) calls this before resetting. NOT called on a panic / watchdog reset or
@@ -237,6 +258,7 @@ bool IRAM_ATTR tx_control_tick(void)
         break;
     }
     write_txout(s_state != TX_SEQ_RX && s_local_pa);
+    write_extpaout(s_state != TX_SEQ_RX && s_local_pa && s_extpa_on);   // Nano: ExtPAout with TXout when {Q1}
     s_gate = (s_state == TX_SEQ_TX) && rf_want;
     s_cw_carrier = cw;
     return cw;
@@ -249,7 +271,7 @@ void tx_control_service(void)
         trip_seen = s_trip_count;
         Serial.print("{D}{N}\r\n");                                                  // TX off in the UI (Nano)
         Serial.printf("-> TX TRIP: %s (SWR %.1f, fwd %.1f W, rev %.2f W, REV pin %.0f mV, PA %.1f degC, limit %d) - "
-                      "send {U} to re-enable\r\n", (const char *)s_trip_reason, s_trip_swr, s_trip_fwd, s_trip_rev,
+                      "send the U command to re-enable\r\n", (const char *)s_trip_reason, s_trip_swr, s_trip_fwd, s_trip_rev,
                       s_trip_rev_mv, s_trip_temp, s_temp_max);
     }
     // {M} before {N} if both happened since the last loop (a very short TX)
@@ -263,7 +285,10 @@ void tx_control_service(void)
         }
         if (off_seen != s_msg_tx_off) { off_seen++; Serial.print("{N}\r\n"); }    // unmute RX
     }
-    if (ptt_seen != s_msg_ptt) { ptt_seen = s_msg_ptt; Serial.printf("-> mic PTT %s\r\n", s_ptt ? "pressed" : "released"); }
+    if (ptt_seen != s_msg_ptt) {
+        ptt_seen = s_msg_ptt;
+        if (!diagnostics_get_muted()) Serial.printf("-> mic PTT %s\r\n", s_ptt ? "pressed" : "released");   // diagnostic
+    }
     if (ovf_seen != s_msg_kf_ovf) { ovf_seen = s_msg_kf_ovf; Serial.printf("-> CW key edge queue overflow\r\n"); }
 }
 
@@ -347,12 +372,20 @@ void tx_level_set(int level)
     if (mag > 100) mag = 100;
     s_level = local ? mag : -mag;
     s_local_pa = local;                                         // the tick drops/restores TXout within 50 us
-    s_level_target = (float)mag / 100.0f;
+    s_l_mag = mag;
+    update_level_target();
 }
 
 int  tx_level_get(void)       { return s_level; }
 bool tx_local_pa_active(void) { return s_local_pa; }
 bool tx_report_idle(void)     { return !s_requested && s_level == 0; }
+
+void tx_extpa_set_on(bool on)   { s_extpa_on = on; update_level_target(); }
+bool tx_extpa_get_on(void)      { return s_extpa_on; }
+void tx_extpa_set_level(int pct){ if (pct < 0) pct = -pct; if (pct > 100) pct = 100; s_extpa_level = pct; update_level_target(); }
+int  tx_extpa_get_level(void)   { return s_extpa_level; }
+bool tx_extpa_out_get(void)     { return s_extpa_out; }
+uint32_t tx_start_count(void)   { return s_msg_tx_on; }
 
 float IRAM_ATTR tx_level_apply(float envelope)
 {

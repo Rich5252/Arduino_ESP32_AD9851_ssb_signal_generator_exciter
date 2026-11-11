@@ -28,8 +28,13 @@
  *   GPIO 16   slow ADC REV power, ADC2 channel 5
  *   GPIO 19   USB D-  (USB-CDC serial to the PC / SDR plugin)             not configurable
  *   GPIO 20   USB D+
- *   GPIO 40   TXout (Nano name): antenna relay + local 2 W PA power, ACTIVE HIGH (high = TX on), {U}/{D}
- *             (tx_control.cpp). Driven low first thing in setup(); fit a ~10k pull-down so it stays off at reset/boot.
+ *   GPIO 45   TXout (Nano name): antenna relay + local 2 W PA power, ACTIVE HIGH (high = TX on), {U}/{D}
+ *             (tx_control.cpp). Driven low first thing in setup(); 10k pull-down fitted. Moved from GPIO40 2026-11-11:
+ *             40 was driven HIGH during a USB flash even with TX off and the pull-down fitted; 45/46 scoped: stay low.
+ *             Strapping pin (VDD_SPI select) - must never be pulled high at reset.
+ *   GPIO 46   ExtPAout (Nano name): external (remote) PA PTT, active high (Nano D4) - pin set, not yet driven by TX
+ *             code (held low by force_safe_outputs()). Moved from 41 2026-11-11 with TXout. Strapping pin (boot
+ *             mode / ROM log): pull-down only, never pulled high at reset.
  *   GPIO 39   chirp-mode square-wave reference; also the (off by default) ADC-ISR and command-window debug marker
  *   GPIO 43   header TX: UART0 TX to the filter/ATU modules, "{f<Hz>}" at 115200 (module_link.cpp). Also carries the
  *             chip's ROM/bootloader text at reset. Driver: one 2N7000/BSS138 (gate from GPIO43, ~100k gate-GND,
@@ -39,23 +44,26 @@
  * ---- Reserved for the TXlink port (no code uses them yet) - TXlink4_Nano names where the Nano had the pin -------
  *   GPIO  1   KeyIn                  input, active low, pull-up (Nano D8)            (assigned 2026-11-10)
  *   GPIO  7   MicPTTin               input, active low, pull-up (new, no Nano equivalent)
- *   GPIO 41   ExtPAout               external (remote) PA PTT, active high (Nano D4)
  *   GPIO 42   FanPin                 PA fan out, active high (Nano D10, on/off there; PWM here needs its own LEDC
  *                                    timer - timer 0 belongs to the RSET PWM)
  *   GPIO 47, 48  free (48 was "local PA TX-on", which is TXout - 2026-11-06)
  *   Inputs on 1/7: external 4.7-10k pull-up to 3V3 (never 5 V) and ~1k series + 10-100 nF to GND at the pin.
- *   Fit ~10k pull-downs on 40/41/42 so TXout, the external PA and the fan are off during reset/boot.
+ *   Fit ~10k pull-downs on 45/46/42 so TXout, the external PA and the fan are off during reset/boot.
+ *   FanPin 42 is a JTAG pin like 40/41: it may also be driven during a flash (not checked; fan on is harmless).
  *   Nano pins with no pin here: KeyOut (D7, RF on via the DDS level shaper) and TXlevelPin (D5, PWM DDS level) -
  *   on the ESP32 RF on/off and level are done in firmware (DDS + RSET envelope PWM on GPIO2).
- *   40-42 are the JTAG MTDO/MTDI/MTMS pins: free while pad JTAG is not used (USB-JTAG is on 19/20).
+ *   40-42 are the JTAG MTDO/MTDI/MTMS pins: usable as GPIO in normal running, but see the avoid list for flashing.
  *   47/48 run at 1.8 V on "V" modules (1.8 V flash); see the board note above about an RGB LED on GPIO48.
  *
  * ---- Avoid ----------------------------------------------------------------------------------------------------
  *   GPIO  0      strapping (boot mode, BOOT button).
  *   GPIO  3      strapping (JTAG source). ALSO: toggling it as a debug output stopped the mic ADC producing any
  *                conversions (2026-09, mechanism unknown).
- *   GPIO 45      strapping: VDD_SPI voltage select - high at reset can select 1.8 V flash supply.
- *   GPIO 46      strapping: ROM log / boot mode with GPIO0. Outputs with pull-downs only, never pulled-up inputs.
+ *   GPIO 40      (and probably 39/41/42, the other JTAG pins - not checked) for anything that must be OFF while the
+ *                chip is being flashed: GPIO40 was seen driven HIGH during a USB flash despite TX off and a 10k
+ *                pull-down (2026-11-11, cause unknown - forum reports, no resolution found).
+ *   GPIO 45/46   strapping pins: OK only as outputs with pull-downs (now TXout / ExtPAout); never pulled high at
+ *                reset, never pulled-up inputs. Both scoped low throughout a flash (2026-11-11).
  *   GPIO 13      5 kHz pulses from the mic ADC driver's activity were seen on this pad (2026-09-02).
  *   GPIO 1-20    ADC pins in general: keep fast-switching signals off them where there is a choice (see 3 and 13).
  *                4/5 (debug) were checked as harmless on the bench; 9-12 (AD9851) work in practice.
@@ -65,7 +73,8 @@
  *   (GPIO 43/44 are in use as the module link above; 44 must not be driven by a 5 V signal.)
  *
  * ---- Spare (not used, not on the avoid list) -----------------------------------------------------------------
- *   8 (ADC1 - analogue or slow signals only), 17, 18 (ADC2), 21, 38, 47, 48. Also 4/5/39 if the debug pins go.
+ *   8 (ADC1 - analogue or slow signals only), 17, 18 (ADC2), 21, 38, 47, 48, and 40/41 (not for anything that
+ *   must be off during a flash). Also 4/5/39 if the debug pins go.
  *   Check the board actually brings each one out.
  *
  * ---- Other on-chip resources claimed ---------------------------------------------------------------------------
@@ -102,13 +111,13 @@
 #define TIMING_DEBUG_GPIO_ADC     39     // ADC ISR marker / command window / chirp reference (one at a time)
 
 // ---- TX switching (tx_control.cpp) ----
-#define TXOUT_GPIO                40     // TXout, active high (high = TX on)
+#define TXOUT_GPIO                45     // TXout, active high (high = TX on); was 40 until 2026-11-11
 
 // ---- TXlink port, reserved (not used by any code yet); Nano names ----
 #define KEYIN_GPIO                1      // Nano KeyIn, active low
 #define MIC_PTT_IN_GPIO           7      // new, active low
 #define FANPIN_GPIO               42     // Nano FanPin, active high
-#define EXTPAOUT_GPIO             41     // Nano ExtPAout, external PA PTT, active high
+#define EXTPAOUT_GPIO             46     // Nano ExtPAout, external PA PTT, active high; was 41 until 2026-11-11
 
 // ---- Module link: UART0 to the filter/ATU modules (module_link.cpp), board header TX/RX ----
 #define MODULE_LINK_TX_GPIO       43
