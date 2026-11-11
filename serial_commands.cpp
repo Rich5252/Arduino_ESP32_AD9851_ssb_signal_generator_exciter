@@ -335,6 +335,9 @@ static void brace_run_command(const brace_cmd_t *cmd)
                 break;
             }
             tx_request_set(cmd->letter == 'U');
+#if AD9851_ATTACHED
+            if (cmd->letter == 'U') module_link_send_freq_khz(carrier_output_get_freq_hz());   // Nano: {f} on {U}
+#endif
             delay(2);   // let the DSP-tick sequencer act (it runs every 50 us) so the reply shows the new state
             bool wait_ptt = tx_request_get() && tx_mode_is_voice(tx_mode_get()) && !tx_ptt_pressed();
             bool wait_key = tx_request_get() && tx_mode_get() == TX_MODE_CW && !tx_key_down();

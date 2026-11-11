@@ -7,6 +7,10 @@
 #include "envelope_floor.h"
 #include "dsp_state.h"
 #include "adc_capture.h"
+#include "module_link.h"
+#if AD9851_ATTACHED
+#include "carrier_output.h"
+#endif
 #include <Arduino.h>
 #include <stdlib.h>
 #include <math.h>
@@ -250,7 +254,13 @@ void tx_control_service(void)
     }
     // {M} before {N} if both happened since the last loop (a very short TX)
     while (on_seen != s_msg_tx_on || off_seen != s_msg_tx_off) {
-        if (on_seen != s_msg_tx_on) { on_seen++; Serial.print("{M}\r\n"); }       // mute RX (Nano)
+        if (on_seen != s_msg_tx_on) {
+            on_seen++;
+            Serial.print("{M}\r\n");                                                // mute RX (Nano)
+#if AD9851_ATTACHED
+            module_link_send_freq_exact(carrier_output_get_freq_hz());               // Nano: exact {f} at key-down
+#endif
+        }
         if (off_seen != s_msg_tx_off) { off_seen++; Serial.print("{N}\r\n"); }    // unmute RX
     }
     if (ptt_seen != s_msg_ptt) { ptt_seen = s_msg_ptt; Serial.printf("-> mic PTT %s\r\n", s_ptt ? "pressed" : "released"); }

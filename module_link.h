@@ -14,8 +14,10 @@
  * frequency rounded to the nearest kHz, written in Hz (e.g. 14201499 Hz -> "{f14201000}"). Sent
  *   - once at boot (after the carrier is set up), so the modules select the right filter/ATU setting at power-up,
  *   - on every accepted {F<Hz>} from the plugin (always, like the Nano, even if the kHz value did not change).
- * Not sent to USB: the plugin never needed it. (The Nano also sends the exact frequency at key-down and on {U};
- * those hooks come with the TX sequencing port - module_link_send_freq_exact() is ready for it.)
+ *   - on every {U} (kHz-rounded, as the Nano's SendTunekHz(true) there),
+ *   - at every key-down / start of TX (RX -> TX transition of the sequencer, tx_control.cpp): the EXACT frequency in
+ *     Hz, as the Nano did at KeyDown. Sent from loop(), so up to ~10 ms after TXout switches on.
+ * Not sent to USB: the plugin never needed it.
  *
  * The ESP32's own ROM/bootloader start-up text also comes out of this pin at reset (115200), before this code runs;
  * the modules only act on "{f...}" so it should be harmless. Writes never block: a line that does not fit in the
