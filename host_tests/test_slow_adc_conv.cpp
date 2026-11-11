@@ -100,6 +100,25 @@ int main()
     check(n > 0 && n < 48, "worst case fits in 48");
     check(slow_adc_format_fields(buf, 10, &f1) == 0 && buf[0] == 0, "too-small buffer -> empty, 0");
 
+    // SWR trip rules (2026-11-11): Nano limits 3.0 / 1 W, REV saturation at 3000 mV
+    auto T = [](float f, float r, float mv) {
+        return slow_adc_swr_trip_check(f, r, slow_adc_swr(f, r), mv, 3.0f, 1.0f, 3000.0f);
+    };
+    check(T(81, 1.35f, 400) == SWR_TRIP_NONE, "trip: normal");
+    check(T(100, 30, 2900) == SWR_TRIP_HIGH, "trip: SWR 3.4");
+    check(T(100, 24, 2900) == SWR_TRIP_NONE, "trip: SWR 2.9 below limit");
+    check(T(10, 12, 1500) == SWR_TRIP_REV_GE_FWD, "trip: reflected >= forward (Nano SWR would be 0)");
+    check(T(0.5f, 0.8f, 500) == SWR_TRIP_NONE, "trip: below forward minimum");
+    check(T(100, 18, 3050) == SWR_TRIP_REV_SATURATED, "trip: REV at ADC full scale");
+    check(T(0, 0, 3100) == SWR_TRIP_REV_SATURATED, "trip: REV saturated with no forward reading");
+
+    // temperature trip rules
+    check(slow_adc_temp_trip_check(40.0f, 54.0f, true) == TEMP_TRIP_NONE, "temp: 40 < 54");
+    check(slow_adc_temp_trip_check(54.0f, 54.0f, true) == TEMP_TRIP_OVER, "temp: 54 >= 54 (Nano uses >=)");
+    check(slow_adc_temp_trip_check(-99.0f, 54.0f, true) == TEMP_TRIP_SENSOR_FAULT, "temp: open/short sensor trips");
+    check(slow_adc_temp_trip_check(-99.0f, 54.0f, false) == TEMP_TRIP_NONE, "temp: sensor fault ignored when disabled");
+    check(slow_adc_temp_trip_check(-20.0f, 54.0f, true) == TEMP_TRIP_NONE, "temp: genuine cold is not a fault");
+
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }

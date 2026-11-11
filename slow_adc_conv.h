@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,24 @@ float slow_adc_swr(float fwd_w, float rev_w);
 
 // NTC to degC (beta equation), pull-up to ntc_supply_v, NTC to ground. Returns -99.0 for an open/shorted input.
 float slow_adc_ntc_degc(float pin_v, const slow_adc_conv_cfg_t *cfg);
+
+// SWR safety trip decision (2026-11-11), Nano rule plus two extra tests:
+//   REV_SATURATED: REV pin at/above rev_sat_mv - the ADC is at the top of its range, so the real reflected power (and
+//                  SWR) can be anything above what is shown -> abort whatever the forward power.
+//   REV_GE_FWD:    forward >= fwd_min_w and reflected >= forward. The Nano's SWR formula returns 0 here, so its
+//                  "SWR > max" test never fired for a total mismatch; treated as infinite SWR.
+//   HIGH:          forward >= fwd_min_w and SWR > swr_max (Nano: SWRfwdMin 1 W, SWRmax 3).
+typedef enum { SWR_TRIP_NONE = 0, SWR_TRIP_HIGH, SWR_TRIP_REV_GE_FWD, SWR_TRIP_REV_SATURATED } swr_trip_t;
+swr_trip_t slow_adc_swr_trip_check(float fwd_w, float rev_w, float swr, float rev_pin_mv,
+                                   float swr_max, float fwd_min_w, float rev_sat_mv);
+const char *slow_adc_swr_trip_name(swr_trip_t t);
+
+// PA temperature trip decision (2026-11-11). Nano: TempDeg >= TxMaxTemp (default 54 degC, {T}) -> abort.
+// Extra: slow_adc_ntc_degc() returns -99 for an open or shorted sensor; with fault_trips set that is an abort too
+// (a shorted NTC really means "very hot", an open one hides any overheating).
+typedef enum { TEMP_TRIP_NONE = 0, TEMP_TRIP_OVER, TEMP_TRIP_SENSOR_FAULT } temp_trip_t;
+temp_trip_t slow_adc_temp_trip_check(float temp_c, float max_c, bool fault_trips);
+const char *slow_adc_temp_trip_name(temp_trip_t t);
 
 // All four values from the three averaged pin voltages.
 void slow_adc_convert(float fwd_v, float rev_v, float temp_v, uint32_t carrier_hz,

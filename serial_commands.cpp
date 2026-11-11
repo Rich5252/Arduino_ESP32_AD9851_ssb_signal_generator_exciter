@@ -365,6 +365,20 @@ static void brace_run_command(const brace_cmd_t *cmd)
                           tx_seq_state_name(), tx_out_get() ? "ON" : "OFF");
             break;
         }
+        case 'T': {
+            // 2026-11-11 {T<degC>}: PA temperature trip limit (Nano TxMaxTemp, default 54). Whole degrees 0..150.
+            const char *a = cmd->arg;
+            int i = 0, val = 0;
+            while (a[i] >= '0' && a[i] <= '9' && i < 4) { val = val * 10 + (a[i] - '0'); i++; }
+            if (i == 0 || i > 3 || a[i] != 0) {
+                serial_reply("-> {T} needs whole degrees C (0-150). Received '%s' - limit unchanged at %d degC\r\n",
+                              a, tx_temp_max_get());
+                break;
+            }
+            tx_temp_max_set(val);
+            serial_reply("-> PA temperature trip limit %d degC%s\r\n", tx_temp_max_get(), val > 150 ? " (clamped)" : "");
+            break;
+        }
         case 'H': {
             // 2026-11-10 {Hn}: CW TX hold, ms after the last key-up before TXout drops (Nano TXholdTime). 0..5000;
             // never shorter than relay delay + RF edge + margin (enforced in the tick).
@@ -416,7 +430,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms, T = PA temp limit degC)\r\n", cmd->letter);
             break;
     }
 }

@@ -782,12 +782,30 @@
 #define SLOW_ADC_READS_DEFAULT    1      // reads running at boot; {K2} pauses them (task blocked, no ADC access), {K3} resumes
 // Conversion (slow_adc_conv.h): Nano curves, pin volts x scale = the volts the Nano would have seen. PLACEHOLDERS -
 // the detector curves need re-measuring on the new hardware.
-#define SLOW_ADC_FWD_SCALE        1.0f
-#define SLOW_ADC_REV_SCALE        1.0f
+#define SLOW_ADC_FWD_SCALE        1.855f   // 2026-11-11: new 22k/33k attenuator after the Nano's 5k6/10k. Calculated
+                                           // 0.641/0.361 = 1.775; set from the user's spot check instead (old system
+                                           // 81 W, this input read 25 W at scale 1.0 -> 1.855). Per-band calibration later.
+#define SLOW_ADC_REV_SCALE        1.0f     // REV: no extra attenuator (sensitivity); spot check 1.35 W vs old 1.40 W.
+                                           // NOTE: the ADC tops out near 3.1 V = about 18 W reflected on the Nano curve,
+                                           // so at high forward power the measurable SWR is limited (300 W fwd -> 1.65).
 #define SLOW_ADC_NTC_SUPPLY_V     3.3f   // NTC to ground, pull-up to this rail
 #define SLOW_ADC_NTC_PULLUP_OHM   47000.0f   // 2026-11-10: 47k to 3V3 on the user's board (Nano: 51k)
 #define SLOW_ADC_NTC_R0_OHM       50000.0f
 #define SLOW_ADC_NTC_BETA         3950.0f
+// SWR safety trip (2026-11-11), checked on every published average (about every 250 ms, as the Nano):
+// trips when REV is at the ADC top (whatever the forward power), or forward >= SWR_TRIP_FWD_MIN_W and either
+// reflected >= forward or SWR > SWR_TRIP_MAX. Action as the Nano: TX request cleared (RF ramps off, TXout drops),
+// "{D}{N}" sent to the plugin, the user must {U} again. 0 = no trip (NOT recommended).
+#define SWR_TRIP_ENABLED          1
+#define SWR_TRIP_MAX              3.0f     // Nano SWRmax
+#define SWR_TRIP_FWD_MIN_W        1.0f     // Nano SWRfwdMin
+#define SWR_TRIP_REV_SAT_MV       3000.0f  // REV pin average at/above this = ADC saturated (top is ~3100 mV)
+// PA temperature trip (2026-11-11), same check and action as the SWR trip. Limit set by {T<degC>} (Nano TxMaxTemp),
+// boot default below. While the PA stays at/above the limit every {U} trips again within ~250 ms (the Nano's
+// TxTempLockout flag was set/cleared but never used, so this is the same in effect).
+#define TEMP_TRIP_ENABLED         1
+#define TEMP_TRIP_DEFAULT_C       54       // Nano TxMaxTemp
+#define TEMP_TRIP_ON_SENSOR_FAULT 1        // open/shorted NTC (reads -99) also trips; 0 = ignore sensor faults
 
 // Worst-case timing diagnostics period, shared by diagnostics.cpp - one
 // sample period in microseconds.

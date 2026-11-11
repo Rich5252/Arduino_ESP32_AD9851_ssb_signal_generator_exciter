@@ -27,6 +27,7 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "soc/sens_struct.h"          // SENS.sar_meas2_ctrl2 - ADC2 RTC-controller register, split read below
 #include "diagnostics.h"              // late tick / stale commit counters shown by {K}
+#include "tx_control.h"               // SWR trip action
 #if AD9851_ATTACHED
 #include "carrier_output.h"
 #endif
@@ -149,6 +150,36 @@ static int split_collect(int *raw)
     return 1;
 }
 
+static uint32_t carrier_hz(void);   // defined further down
+
+// 2026-11-11 safety trips on every published average (rules in slow_adc_conv.h): SWR (needs real FWD and REV
+// inputs) and PA temperature (needs a real TEMP input; limit from {T}). Only while TX is requested - once per over,
+// re-armed by the next {U}; a condition that persists trips again within ~250 ms of that {U}.
+static void check_trips(void)
+{
+    if (!tx_request_get()) return;
+    slow_adc_reading_t r;
+    slow_adc_convert(s_avg_mv[SLOW_ADC_FWD] / 1000.0f, s_avg_mv[SLOW_ADC_REV] / 1000.0f,
+                     s_avg_mv[SLOW_ADC_TEMP] / 1000.0f, carrier_hz(), &s_conv, &r);
+#if SWR_TRIP_ENABLED
+    if (s_ch[SLOW_ADC_FWD].kind == CH_ADC2 && s_ch[SLOW_ADC_REV].kind == CH_ADC2) {
+        swr_trip_t t = slow_adc_swr_trip_check(r.fwd_w, r.rev_w, r.swr, s_avg_mv[SLOW_ADC_REV],
+                                               SWR_TRIP_MAX, SWR_TRIP_FWD_MIN_W, SWR_TRIP_REV_SAT_MV);
+        if (t != SWR_TRIP_NONE) {
+            tx_trip(slow_adc_swr_trip_name(t), r.swr, r.fwd_w, r.rev_w, s_avg_mv[SLOW_ADC_REV], r.temp_c);
+            return;
+        }
+    }
+#endif
+#if TEMP_TRIP_ENABLED
+    if (s_ch[SLOW_ADC_TEMP].kind == CH_ADC2) {
+        temp_trip_t t = slow_adc_temp_trip_check(r.temp_c, (float)tx_temp_max_get(), TEMP_TRIP_ON_SENSOR_FAULT != 0);
+        if (t != TEMP_TRIP_NONE)
+            tx_trip(slow_adc_temp_trip_name(t), r.swr, r.fwd_w, r.rev_w, s_avg_mv[SLOW_ADC_REV], r.temp_c);
+    }
+#endif
+}
+
 static void publish_average(void)
 {
     s_seq = s_seq + 1;                                   // odd: writing
@@ -160,6 +191,7 @@ static void publish_average(void)
     }
     s_windows = s_windows + 1;
     s_seq = s_seq + 1;                                   // even: stable
+    check_trips();
 }
 
 static void slow_adc_task(void *arg)
@@ -401,8 +433,8 @@ void slow_adc_format_status(char *buf, size_t buf_len)
     double secs = s_prev_us ? (double)(now_us - s_prev_us) / 1e6 : 0.0;
     if (n < buf_len) {
         if (secs > 0.0)
-            snprintf(buf + n, buf_len - n, "->   dsp since last K (%.1f s): late ticks +%lu (%.2f/s), stale commits +%lu (%.2f/s)\r\n",
-                     secs, (unsigned long)dl, dl / secs, (unsigned long)ds, ds / secs);
+            snprintf(buf + n, buf_len - n, "->   dsp since last K (%.1f s): late ticks +%lu (%.2f/s), stale commits +%lu (%.2f/s); trips %lu, PA temp limit %d degC\r\n",
+                     secs, (unsigned long)dl, dl / secs, (unsigned long)ds, ds / secs, (unsigned long)tx_trip_count(), tx_temp_max_get());
         else
             snprintf(buf + n, buf_len - n, "->   dsp: late ticks %lu, stale commits %lu (rates from the next K)\r\n",
                      (unsigned long)late, (unsigned long)stale);

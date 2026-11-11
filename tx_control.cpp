@@ -75,6 +75,16 @@ static float          s_scale = 0.0f;
 static bool           s_cw_carrier = false;
 static volatile bool  s_shutdown = false;  // set by the reboot shutdown handler: TX forced off for good
 
+// ---- trip (slow_adc task -> loop message) ----
+static volatile uint32_t s_trip_count = 0;
+static const char *volatile s_trip_reason = "";
+static volatile float s_trip_swr = 0, s_trip_fwd = 0, s_trip_rev = 0, s_trip_rev_mv = 0, s_trip_temp = 0;
+
+#ifndef TEMP_TRIP_DEFAULT_C
+#define TEMP_TRIP_DEFAULT_C 54
+#endif
+static volatile int s_temp_max = TEMP_TRIP_DEFAULT_C;
+
 // ---- tick -> loop messages ----
 static volatile uint32_t s_msg_tx_on = 0, s_msg_tx_off = 0, s_msg_ptt = 0, s_msg_key = 0, s_msg_kf_ovf = 0;
 
@@ -230,7 +240,14 @@ bool IRAM_ATTR tx_control_tick(void)
 
 void tx_control_service(void)
 {
-    static uint32_t on_seen = 0, off_seen = 0, ptt_seen = 0, ovf_seen = 0;
+    static uint32_t on_seen = 0, off_seen = 0, ptt_seen = 0, ovf_seen = 0, trip_seen = 0;
+    if (trip_seen != s_trip_count) {
+        trip_seen = s_trip_count;
+        Serial.print("{D}{N}\r\n");                                                  // TX off in the UI (Nano)
+        Serial.printf("-> TX TRIP: %s (SWR %.1f, fwd %.1f W, rev %.2f W, REV pin %.0f mV, PA %.1f degC, limit %d) - "
+                      "send {U} to re-enable\r\n", (const char *)s_trip_reason, s_trip_swr, s_trip_fwd, s_trip_rev,
+                      s_trip_rev_mv, s_trip_temp, s_temp_max);
+    }
     // {M} before {N} if both happened since the last loop (a very short TX)
     while (on_seen != s_msg_tx_on || off_seen != s_msg_tx_off) {
         if (on_seen != s_msg_tx_on) { on_seen++; Serial.print("{M}\r\n"); }       // mute RX (Nano)
@@ -241,6 +258,18 @@ void tx_control_service(void)
 }
 
 void tx_request_set(bool on) { s_requested = on; }
+
+void tx_trip(const char *reason, float swr, float fwd_w, float rev_w, float rev_pin_mv, float temp_c)
+{
+    s_requested = false;                       // the tick ramps RF off within {E} ms and drops TXout after it
+    s_trip_reason = reason; s_trip_swr = swr; s_trip_fwd = fwd_w; s_trip_rev = rev_w; s_trip_rev_mv = rev_pin_mv;
+    s_trip_temp = temp_c;
+    s_trip_count = s_trip_count + 1;
+}
+
+void tx_temp_max_set(int deg_c) { if (deg_c < 0) deg_c = 0; if (deg_c > 150) deg_c = 150; s_temp_max = deg_c; }
+int  tx_temp_max_get(void)      { return s_temp_max; }
+uint32_t tx_trip_count(void) { return s_trip_count; }
 bool tx_request_get(void)    { return s_requested; }
 bool tx_out_get(void)        { return s_tx_on; }
 

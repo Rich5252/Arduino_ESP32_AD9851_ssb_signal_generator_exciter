@@ -56,6 +56,43 @@ float slow_adc_ntc_degc(float pin_v, const slow_adc_conv_cfg_t *cfg)
     return t - 273.0f;
 }
 
+swr_trip_t slow_adc_swr_trip_check(float fwd_w, float rev_w, float swr, float rev_pin_mv,
+                                   float swr_max, float fwd_min_w, float rev_sat_mv)
+{
+    if (rev_pin_mv >= rev_sat_mv) return SWR_TRIP_REV_SATURATED;
+    if (fwd_w >= fwd_min_w) {
+        if (rev_w >= fwd_w) return SWR_TRIP_REV_GE_FWD;
+        if (swr > swr_max)  return SWR_TRIP_HIGH;
+    }
+    return SWR_TRIP_NONE;
+}
+
+const char *slow_adc_swr_trip_name(swr_trip_t t)
+{
+    switch (t) {
+    case SWR_TRIP_HIGH:          return "SWR above limit";
+    case SWR_TRIP_REV_GE_FWD:    return "reflected >= forward";
+    case SWR_TRIP_REV_SATURATED: return "REV input at ADC full scale";
+    default:                     return "none";
+    }
+}
+
+temp_trip_t slow_adc_temp_trip_check(float temp_c, float max_c, bool fault_trips)
+{
+    if (temp_c <= -98.0f) return fault_trips ? TEMP_TRIP_SENSOR_FAULT : TEMP_TRIP_NONE;
+    if (temp_c >= max_c)  return TEMP_TRIP_OVER;
+    return TEMP_TRIP_NONE;
+}
+
+const char *slow_adc_temp_trip_name(temp_trip_t t)
+{
+    switch (t) {
+    case TEMP_TRIP_OVER:         return "PA temperature at/above limit";
+    case TEMP_TRIP_SENSOR_FAULT: return "PA temperature sensor open/shorted";
+    default:                     return "none";
+    }
+}
+
 void slow_adc_convert(float fwd_v, float rev_v, float temp_v, uint32_t carrier_hz,
                       const slow_adc_conv_cfg_t *cfg, slow_adc_reading_t *out)
 {

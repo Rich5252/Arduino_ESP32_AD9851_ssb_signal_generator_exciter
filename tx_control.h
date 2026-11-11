@@ -96,6 +96,15 @@ void tx_level_set(int level);
 int  tx_level_get(void);
 bool tx_local_pa_active(void);
 
+// SWR trip (called by slow_adc's task): clears the TX request (sequencer ramps RF off and drops TXout), sends
+// "{D}{N}" to the plugin and a "-> TX TRIP" line from loop(). reason/values are only for the message.
+void tx_trip(const char *reason, float swr, float fwd_w, float rev_w, float rev_pin_mv, float temp_c);
+
+// {T<degC>} PA temperature trip limit (Nano TxMaxTemp)
+void tx_temp_max_set(int deg_c);
+int  tx_temp_max_get(void);
+uint32_t tx_trip_count(void);
+
 // true while TX is not requested ({D}) and the level is exactly {L0}: the slow-ADC {F}{R}{S}{T} serial report is
 // suppressed then (instrumentation.cpp); the ADC readings and any checks on them carry on.
 bool tx_report_idle(void);
