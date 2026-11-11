@@ -223,6 +223,23 @@ const char* test_signals_next_twotone_phase_gen(void)
     return TWOTONE_PHASE_GEN_NAMES[s_twotone_phase_gen_mode];
 }
 
+void test_signals_set_twotone_phase_gen(twotone_phase_gen_t gen)
+{
+    if ((int)gen < 0 || (int)gen > 2) gen = TWOTONE_PHASE_GEN_EXACT;
+    s_twotone_phase_gen_mode = gen;
+}
+
+void test_signals_twotone_restore_tone_defaults(void)
+{
+    s_band_index = TWOTONE_BAND_COUNT - 1;      // boot value: the next 'T' starts the sweep at index 0
+    s_tone1_hz = TWOTONE_F1_HZ;
+    s_tone2_hz = TWOTONE_F2_HZ;
+    s_tone_ratio_index = TONE_RATIO_EQUAL_INDEX;
+    s_tone1_amplitude = TWOTONE_AMPLITUDE;
+    s_tone2_amplitude = TWOTONE_AMPLITUDE;
+    test_signals_set_twotone_dither_enabled(TWOTONE_DITHER_ENABLED);   // boot value (config.h, off)
+}
+
 void test_signals_set_twotone_dither_enabled(bool enable)
 {
     s_twotone_dither_enable = enable;

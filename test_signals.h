@@ -229,6 +229,14 @@ const char* test_signals_next_twotone_phase_gen(void);     // cycles to the next
 // generate_twotone_sample() call). 'O' now calls this together with ssb_dsp_request_reset() so a mode switch
 // restarts cleanly instead of stepping the tone phase. Safe from any task (sets a flag only).
 void test_signals_twotone_request_reset(void);
+// 2026-11-11 mode defaults (mode_defaults.h): set the phase generator directly (no cycling) - used when {M128} Tune is
+// selected. Plain store, same as 'O' minus the reset; the caller asks for the restart.
+void test_signals_set_twotone_phase_gen(twotone_phase_gen_t gen);
+// 2026-11-11 mode defaults: tone pair back to the boot state - TWOTONE_F1_HZ/F2_HZ (the 'T' cycle restarts from its
+// first entry on the next press, as after boot), equal amplitudes (the 'R' 0 dB step), dither ('Q') at its boot value
+// (TWOTONE_DITHER_ENABLED, off). The caller
+// asks for the generator restart.
+void test_signals_twotone_restore_tone_defaults(void);
 
 // Envelope step test ('p') - slow square wave direct to the envelope
 // output, carrier held fixed, bypassing ssb_dsp_process_sample()

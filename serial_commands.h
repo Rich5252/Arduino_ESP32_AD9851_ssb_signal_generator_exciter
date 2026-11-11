@@ -14,3 +14,7 @@
 // exactly like the original inline while(Serial.available()) block in
 // loop(). Call once per loop() iteration.
 void handle_serial_commands(void);
+
+// 2026-11-11: loads settingsPresets[preset] (settings.h), 0-9 - exactly what the '0'-'9' keys do, without the reply
+// line. Used by the keys and by the {M} mode defaults (mode_defaults.h). Loop context only. Out of range: ignored.
+void settings_apply_preset(int preset);
