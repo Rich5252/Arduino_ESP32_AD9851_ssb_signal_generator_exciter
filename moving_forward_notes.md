@@ -4711,6 +4711,33 @@ Ported at the user's request ("go for it") after the Gaussian simulations. New p
   - Decodes over the air.
   - Plugin timing of `{W}` against `{X1}`.
 
+### 2026-11-12 - Does the wider Gaussian cost decode sensitivity? (simulation only)
+
+User question: does the wide Gaussian smear the tones and make decoding worse? `host_tests/digi_detection_loss.py` models a per-symbol FFT-bin detector (non-coherent tone power over each symbol, as the WSJT-X decoders' symbol spectra), averaged over 4000 random symbols. Model only, hedged:
+- Wanted-tone power vs ideal FSK: FT8 GFSK BT=2 -0.05 dB, FT4 GFSK BT=1 -0.10 dB, the Nano curve -0.00 dB.
+- Worst leakage into another tone's bin: FT8 GFSK -30 dB, FT4 GFSK -24 dB, the Nano curve -47 to -50 dB. At the SNRs where decoding is marginal (-20 dB and below in 2500 Hz) this leakage is far below the noise in each bin.
+- Reading: a sensitivity cost of about 0.05-0.1 dB, against the 30-48 dB lower skirts. As far as I know this is the waveform WSJT-X itself has transmitted since 2.1, so the decoders (and their signal subtraction) are built around it. Not measured on air.
+
+### 2026-11-12 - Optional Gaussian edges for RTTY (uncompiled for the ESP32; host-tested)
+
+User asked for optional RTTY shaping after a discussion of shaped vs hard-keyed RTTY on air. `DIGI_BT_RTTY` in `config.h`: 0 (default) = hard-keyed as the Nano; > 0 = Gaussian mark/space edges with BT relative to the 22.0 ms bit, the same erf step as the FT modes. Bit boundaries fall between ticks, so the table is read with linear interpolation.
+- Change of behaviour: the next character is now fetched at the start of the stop bit (44 ms earlier than the Nano did), so its start-bit edge can begin before the boundary. Result: `{X0}` is noticed one character sooner at worst. With BT 0 the output is the same as before (all the RTTY host tests still pass).
+- Simulation (`host_tests/digi_gaussian_sim/rtty_shaping.py`): non-coherent integrate-and-dump FSK detector, 40000 bits at Eb/N0 9 dB. Equivalent loss: hard 0.0 dB, BT 2.0 0.14 dB, BT 1.0 0.48 dB, BT 0.7 1.0 dB. Real RTTY demodulators (filters, ATC) may differ - model only.
+- Spectrum of the generator's own output (`rtty_generator_spectrum.py`), dBc/Hz beyond mark/space at +50/100/200/400/800 Hz:
+  - hard: -40 / -47 / -55 / -64 / -74.
+  - BT 2.0: -45 / -58 / -72 / -113 / -184.
+  - BT 1.0: -51 / -61 / -98 / -168 / -182.
+- Host test now has 60 checks, all passing: shaped RTTY at BT 2.0 and 1.0 decodes back to the text, has the same length as hard keying, maximum slope at the Gaussian limit (2.33 / 1.16 Hz per tick), bit centres on ±85 Hz, ends on mark.
+- Suggested starting point for on-air tests: BT 2.0.
+
+### 2026-11-12 - Digital-mode timing on the bench: max_busy 61 us, 3 overruns (cause suspected, not fixed)
+
+The user's `V` after digital runs showed: max_busy_us 61 (adc 37 / dsp 17 / write 18), overruns 3, wakeup max_gap 65 us, late_ticks_total 0. CW had measured 44 us. Mode not stated (held offset 562.5 Hz). The counters are maxima since reset and `V` does not reset them.
+- Suspected cause (from the code, not measured): digi_gen.cpp breaks the project rule that everything dsp_task calls is IRAM_ATTR (ssb_mic_test.ino, above dsp_task: flash cache stalls from Core 1 activity). digi_tick() and everything below it run from flash, and `jttySync[]` is const in flash. The per-symbol paths (boundary checks, AdjustStart, RTTY next character, restarts) run only every 24-160 ms, so they are likely to be cold in the cache shared with Core 1. That matches occasional overruns rather than a steady rise.
+- Smaller costs: RTTY does double-precision maths every tick (software on the S3), and the FT boundaries use 64-bit divides in ms_of_ticks().
+- Proposed fix, not yet made: DIGI_HOT = IRAM_ATTR on ESP32 for digi_tick and its tick-path functions; tick-path constant data in DRAM; RTTY time in integer microseconds with float edges; 32-bit tick->ms. Then re-measure after a counter reset in each mode.
+- Effect so far: one tick up to ~15 us late now and then. That is far below anything the symbol-timing jitter simulation showed (1 ms random made no difference).
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

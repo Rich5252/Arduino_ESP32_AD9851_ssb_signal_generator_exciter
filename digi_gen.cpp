@@ -77,7 +77,7 @@ typedef struct {
 static digi_tab_t s_tab[2];
 static volatile int s_tab_pub = 0;
 
-static digi_cfg_t s_cfg = { 20000, 1, 2.0f, 1.0f, 1.0f, 2.0f };
+static digi_cfg_t s_cfg = { 20000, 1, 2.0f, 1.0f, 1.0f, 2.0f, 0.0f };
 
 // ======================================================================================== shared (command side)
 static volatile int  s_mode = DIGI_MODE_FT8;          // Nano TxMode
@@ -130,7 +130,8 @@ static int  s_rt_phase = 0, s_rt_idx = 0, s_rt_pos = 0, s_rt_bit = 0, s_rt_code 
 static bool s_rt_ltrs = true;
 static char s_rt_text[MAX_MESSAGE_LENGTH];
 static uint32_t s_q_clear_seen = 0;
-static double   s_rt_t_us = 0, s_rt_bit_end_us = 0;
+static double   s_rt_t_us = 0, s_rt_bit_start_us = 0, s_rt_bit_end_us = 0;
+static int      s_rt_pending = -1;                    // next code, fetched when the stop bit starts (lookahead)
 // JTTY
 static uint32_t s_jt_total = 0;
 
@@ -190,6 +191,25 @@ static void build_table(digi_tab_t *t, int mode)
                          t->symbol_count = FT2_SYMBOL_COUNT; bt = s_cfg.bt_ft2; steps = 96; break;
     case DIGI_MODE_JTTY: t->spacing_hz = JTTY_TONE_SPACING_HZ; t->tone_duration_ms = JTTY_tone_duration;
                          bt = s_cfg.bt_jtty; steps = 64; break;
+    case DIGI_MODE_RTTY: {
+        // ESP32 2026-11-12: optional Gaussian edges for RTTY (DIGI_BT_RTTY > 0; 0 = hard keyed as the Nano). Same erf
+        // step, BT relative to the 22 ms bit; boundaries fall between ticks, so the table is read with interpolation.
+        t->spacing_hz = 0; t->tone_duration_ms = 0; t->nsym = 0; t->symbol_count = 0;
+        t->W = 0; t->phi[0] = 0;
+        if (s_cfg.bt_rtty > 0.0f) {
+            const double dt = 1.0 / (double)s_cfg.tick_hz;
+            double Tb = BIT_DURATION_US * 1e-6;
+            double sigma = sqrt(log(2.0)) / (2.0 * M_PI * (double)s_cfg.bt_rtty) * Tb;
+            int W = (int)ceil(4.5 * sigma / dt);
+            int maxW = (int)floor(Tb / dt) - 1;                // only neighbouring boundaries are summed
+            if (W > maxW) W = maxW;
+            if (W > DIGI_MAX_W) W = DIGI_MAX_W;
+            t->W = W;
+            for (int x = -W; x <= W; x++)
+                t->phi[x + W] = (float)(0.5 * (1.0 + erf((x * dt) / (sigma * sqrt(2.0)))));
+        }
+        return;
+    }
     default:             t->spacing_hz = 0; t->tone_duration_ms = 0; t->W = 0; t->nsym = 0; t->phi[0] = 0; return;
     }
     t->nsym = ticks_of_ms(t->tone_duration_ms);
@@ -347,6 +367,30 @@ static int rtty_next_code(void)
 
 // bit b of the current code: 0 = start (space), 1..5 = data LSB first, 6 = stop (mark, two bit times)
 static int  rtty_bit_value(int b)  { return b == 0 ? 0 : (b == 6 ? 1 : (s_rt_code >> (b - 1)) & 1); }
+static float rtty_hz(int v)        { return (float)(v ? MARK_FREQ : SPACE_FREQ); }
+
+// erf step at a boundary x_us away (x < 0: before it). W == 0: hard step, exactly the Nano's keying.
+static float rtty_phi(double x_us)
+{
+    const digi_tab_t *t = s_rt;
+    if (t->W == 0) return x_us >= 0.0 ? 1.0f : 0.0f;
+    double xt = x_us * (double)s_cfg.tick_hz * 1e-6;
+    if (xt <= -t->W) return t->phi[0];
+    if (xt >= t->W) return 1.0f;
+    int i = (int)floor(xt);
+    float fr = (float)(xt - i);
+    float a = t->phi[i + t->W];
+    float b = (i + 1 >= t->W) ? 1.0f : t->phi[i + 1 + t->W];
+    return a + (b - a) * fr;
+}
+
+// Tone after the current bit: the next data/stop bit, or the next character's start bit (space), or - when the
+// message ends - mark held (no change).
+static float rtty_next_hz(void)
+{
+    if (s_rt_bit < 6) return rtty_hz(rtty_bit_value(s_rt_bit + 1));
+    return s_rt_pending >= 0 ? rtty_hz(0) : s_cur;
+}
 static long rtty_bit_len_us(int b) { return b == 6 ? STOP_BIT_DURATION_US : BIT_DURATION_US; }
 
 // ======================================================================================================== JTTY
@@ -546,12 +590,15 @@ static void start_run(void)
         s_rt_phase = RT_PRE; s_rt_idx = 0; s_rt_ltrs = true;
         if (!dequeueMessage(s_rt_text)) { end_run(); return; }   // Nano: nothing queued -> straight back to RX
         s_rt_code = rtty_next_code();
+        s_rt_pending = -1;
         s_rt_bit = 0;
         s_rt_t_us = 0;
+        s_rt_bit_start_us = 0;
         s_rt_bit_end_us = (double)rtty_bit_len_us(0);
         s_symbols_sent = 1;
         s_first_symbol = 0;
-        s_freq = s_cur = (float)(rtty_bit_value(0) ? MARK_FREQ : SPACE_FREQ);
+        s_freq = s_cur = s_prev = rtty_hz(rtty_bit_value(0));
+        s_next = rtty_next_hz();
         return;
     }
     s_sym_len = s_rt->nsym;
@@ -672,14 +719,25 @@ static int rtty_tick(void)
     s_run_tick++;
     while (s_rt_t_us >= s_rt_bit_end_us) {
         if (++s_rt_bit > 6) {
-            s_rt_code = rtty_next_code();
-            if (s_rt_code < 0) return TK_DONE;   // the last stop bit has been sent in full
+            s_rt_code = s_rt_pending;                          // fetched when the stop bit began
+            if (s_rt_code < 0) return TK_DONE;                 // the last stop bit has been sent in full
+            s_rt_pending = -1;
             s_rt_bit = 0;
             s_symbols_sent = s_symbols_sent + 1;
         }
+        // ESP32: the next character is fetched at the start of the stop bit (44 ms early), so the edge into its
+        // start bit can begin before the boundary. Nano: fetched after the stop bit.
+        if (s_rt_bit == 6) s_rt_pending = rtty_next_code();
+        s_prev = s_cur;
+        s_cur = rtty_hz(rtty_bit_value(s_rt_bit));
+        s_rt_bit_start_us = s_rt_bit_end_us;
         s_rt_bit_end_us += (double)rtty_bit_len_us(s_rt_bit);
+        s_next = rtty_next_hz();
     }
-    s_freq = (float)(rtty_bit_value(s_rt_bit) ? MARK_FREQ : SPACE_FREQ);   // Nano: hard FSK, mark +85 / space -85
+    // mark +85 / space -85 Hz; with DIGI_BT_RTTY 0 the steps are hard (Nano), otherwise Gaussian, centred on the bit
+    // boundaries as in the FT modes
+    s_freq = s_cur + (s_cur - s_prev) * (rtty_phi(s_rt_t_us - s_rt_bit_start_us) - 1.0f)
+                   + (s_next - s_cur) * rtty_phi(s_rt_t_us - s_rt_bit_end_us);
     return TK_MORE;
 }
 

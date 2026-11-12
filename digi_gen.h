@@ -20,7 +20,8 @@
  *   shape 1 (default): the WSJT-X GFSK pulse - FT8 BT 2, FT4 BT 1 (WSJT-X), FT2 BT 1, JTTY BT 2 (assumed; config.h)
  *   shape 0: the Nano curve exactly as it ran (its table, its integer interpolation, its 64 us steps, its timing).
  * Simulation (host_tests/digi_gaussian_sim) says shape 1 cuts the spread by about 30 dB (FT8) / 48 dB (FT4) at
- * +50..100 Hz; step time and 1 ms timing jitter made no difference. RTTY stays hard-keyed FSK, as on the Nano.
+ * +50..100 Hz; step time and 1 ms timing jitter made no difference. RTTY is hard-keyed FSK as on the Nano unless
+ * bt_rtty > 0 (2026-11-12): then its mark/space changes are Gaussian too.
  *
  * Pure C++: no Arduino/ESP code, host-tested by host_tests/test_digi_gen.cpp. Threads: the digi_cmd_*(),
  * digi_set_mode() and digi_abort() calls are made from loop() / other tasks (Core 1); digi_tick() runs in dsp_task
@@ -40,6 +41,7 @@ typedef struct {
     uint32_t tick_hz;           // DSP tick rate (SAMPLE_RATE_HZ, 20000)
     int      shape;             // 1 = WSJT-X GFSK pulse, 0 = Nano curve
     float    bt_ft8, bt_ft4, bt_ft2, bt_jtty;
+    float    bt_rtty;           // 2026-11-12: 0 = hard-keyed RTTY (Nano); > 0 = Gaussian edges, BT relative to the bit
 } digi_cfg_t;
 
 void digi_init(const digi_cfg_t *cfg);   // once, before anything else (builds the boot mode's tables)

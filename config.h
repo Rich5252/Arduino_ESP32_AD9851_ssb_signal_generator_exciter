@@ -847,6 +847,11 @@
 #define DIGI_BT_FT4               1.0f     // WSJT-X FT4
 #define DIGI_BT_FT2               1.0f     // assumed (FT4's)
 #define DIGI_BT_JTTY              2.0f     // assumed (the Nano's JTTY comment: "BT=2 like FT8")
+// RTTY (2026-11-12): 0 = hard-keyed FSK as the Nano; > 0 = Gaussian mark/space edges, BT relative to the 22 ms bit.
+// Simulated (host_tests/digi_gaussian_sim/rtty_shaping.py, integrate-and-dump FSK detector):
+//   BT 2.0: 3.7 ms edges, about 0.1 dB, skirts -12 dB at +100 Hz / -17 dB at +200 Hz / -49 dB at +400 Hz vs hard
+//   BT 1.0: 7.5 ms edges, about 0.5 dB, -14 / -43 / -104 dB.   BT 0.7: about 1.0 dB.
+#define DIGI_BT_RTTY              0.0f
 
 // Worst-case timing diagnostics period, shared by diagnostics.cpp - one
 // sample period in microseconds.

@@ -64,7 +64,7 @@ struct Seq {
     int rf_count() const { int n = 0; for (auto r : rf) n += r; return n; }
 };
 
-static digi_cfg_t cfg(int shape) { digi_cfg_t c = { (uint32_t)FS, shape, 2.0f, 1.0f, 1.0f, 2.0f }; return c; }
+static digi_cfg_t cfg(int shape, float bt_rtty = 0.0f) { digi_cfg_t c = { (uint32_t)FS, shape, 2.0f, 1.0f, 1.0f, 2.0f, bt_rtty }; return c; }
 
 static std::string random_symbols(int n, int m, unsigned seed)
 {
@@ -311,6 +311,44 @@ static void test_rtty(void)
     check(s3.rf_count() == 0 && !s3.out.key, "RTTY with nothing queued: no RF");
 }
 
+static int rtty_len_hard = 0;
+static void test_rtty_shaped(float bt, const char *dumpdir, const char *name)
+{
+    digi_cfg_t c = cfg(1, bt); digi_init(&c);
+    digi_set_mode(DIGI_MODE_RTTY);
+    digi_cmd_V(0);
+    digi_cmd_Z("cq test de g4ahn 599 73");
+    digi_cmd_Z("2ND LINE");
+    Seq s; digi_cmd_X(1); s.run_until_idle(30 * FS);
+    std::string txt = rtty_decode(s, nullptr);
+    check(txt == "\r\nCQ TEST DE G4AHN 599 73 2ND LINE\r\n", "RTTY BT %.1f decodes back: got [%s]", bt, txt.c_str());
+    int a = s.rf_first(), b = s.rf_last();
+    double sigma = sqrt(log(2.0)) / (2 * M_PI * bt) * 0.022002 * FS;          // ticks
+    double lim = 170.0 / (sigma * sqrt(2 * M_PI));
+    double ms = max_step(s, a, b);
+    check(ms <= lim * 1.02, "RTTY BT %.1f smooth: max step %.3f Hz/tick, limit %.3f", bt, ms, lim);
+    // bit centres sit on the tones; the whole thing is as long as the hard-keyed version of the same text
+    double dmax = 0; double t_us = 0;
+    for (int k = 0; k < 40; k++) { int i = a + (int)((t_us + 11001) / 50.0); dmax = fmax(dmax, fabs(fabs(s.f[i]) - 85.0)); t_us += 22002; }
+    check(dmax < 0.05, "RTTY BT %.1f bit centres on +/-85 Hz (%.4f)", bt, dmax);
+    check(fabs(s.f[b] - 85.0f) < 1e-3, "RTTY BT %.1f ends on mark", bt);
+    check(abs(s.rf_count() - rtty_len_hard) <= 1, "RTTY BT %.1f same length as hard keying (%d vs %d)", bt, s.rf_count(), rtty_len_hard);
+    printf("RTTY BT %.1f: %d ticks of RF, max step %.3f Hz/tick (limit %.3f), bit-centre error %.2e Hz\n", bt, s.rf_count(), ms, lim, dmax);
+    dump(dumpdir, name, s, a, b);
+}
+
+static void test_rtty_hard_len(const char *dumpdir)
+{
+    digi_cfg_t c = cfg(1, 0.0f); digi_init(&c);
+    digi_set_mode(DIGI_MODE_RTTY);
+    digi_cmd_V(0);
+    digi_cmd_Z("cq test de g4ahn 599 73");
+    digi_cmd_Z("2ND LINE");
+    Seq s; digi_cmd_X(1); s.run_until_idle(30 * FS);
+    rtty_len_hard = s.rf_count();
+    dump(dumpdir, "rtty_hard.f32", s, s.rf_first(), s.rf_last());
+}
+
 // ---------------------------------------------------------------------------------------------------- JTTY
 static std::string hexframe(unsigned seed) { std::string s; srand(seed); for (int i = 0; i < 23; i++) s += "0123456789ABCDEF"[rand() % 16]; return s; }
 
@@ -394,6 +432,9 @@ int main(int argc, char **argv)
     test_ft_adjust_and_tune();
     test_ft_restart(dumpdir);
     test_rtty();
+    test_rtty_hard_len(dumpdir);
+    test_rtty_shaped(2.0f, dumpdir, "rtty_bt2.f32");
+    test_rtty_shaped(1.0f, dumpdir, "rtty_bt1.f32");
     test_jtty();
     test_ft2_and_modes();
     printf("%d checks, %d failed\n", checks, fails);

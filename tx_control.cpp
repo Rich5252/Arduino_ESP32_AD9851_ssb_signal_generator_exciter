@@ -201,7 +201,8 @@ void tx_control_init(void)
     s_edge_lut[EDGE_LUT_N] = 1.0f;
     s_state = TX_SEQ_RX;
     // 2026-11-11 digital modes: generator tables for the Nano's default FT8, then the boot mode (not digital)
-    digi_cfg_t dc = { (uint32_t)SAMPLE_RATE_HZ, DIGI_GAUSSIAN_SHAPE, DIGI_BT_FT8, DIGI_BT_FT4, DIGI_BT_FT2, DIGI_BT_JTTY };
+    digi_cfg_t dc = { (uint32_t)SAMPLE_RATE_HZ, DIGI_GAUSSIAN_SHAPE, DIGI_BT_FT8, DIGI_BT_FT4, DIGI_BT_FT2, DIGI_BT_JTTY,
+                      DIGI_BT_RTTY };
     digi_init(&dc);
     digi_set_mode(s_mode);
 }
