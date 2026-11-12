@@ -32,6 +32,7 @@
 #include "carrier_output.h"
 #endif
 #include <Arduino.h>
+#include "esp_timer.h"   // 2026-11-12 {K} tick profile: esp_timer_get_time() cost probe
 #include <cstdarg>
 #include <cstring>
 #include "freertos/FreeRTOS.h"
@@ -337,6 +338,35 @@ static void brace_run_command(const brace_cmd_t *cmd)
                                   "50-60 %lu, >=60 %lu (of %lu)\r\n", (unsigned long)diagnostics_stage_latency_take_max(),
                                   (unsigned long)d[0], (unsigned long)d[1], (unsigned long)d[2], (unsigned long)d[3],
                                   (unsigned long)d[4], (unsigned long)d[5], (unsigned long)tot);
+                }
+#endif
+#if TICK_PROFILE_ENABLED
+                {
+                    // 2026-11-12 tick profile, mean/max us per section since the previous {K} (CPU cycle counter)
+                    static tick_profile_t pf;
+                    diagnostics_take_tick_profile(&pf);
+                    const double mhz = (double)getCpuFrequencyMhz();
+                    const double n = pf.count ? (double)pf.count : 1.0;
+                    static const char *const names[TICK_PROF_SECTIONS] = {
+                        "pwm", "txctl", "adc", "ssb", "envchain", "level", "reldelay", "stage", "diag", "dacq", "tail" };
+                    char line[400];
+                    int k = snprintf(line, sizeof line, "->   tick profile us mean/max (%lu ticks): wake %.1f/%lu",
+                                     (unsigned long)pf.count, (double)pf.sum_wake_us / n, (unsigned long)pf.max_wake_us);
+                    for (int i = 0; i < TICK_PROF_SECTIONS && k > 0 && k < (int)sizeof line; i++) {
+                        k += snprintf(line + k, sizeof line - k, "%s %s %.1f/%.1f", i == 8 ? " | after staging:" : ",",
+                                      names[i], (double)pf.sum_cyc[i] / n / mhz, (double)pf.max_cyc[i] / mhz);
+                        if (i == 7 && k > 0 && k < (int)sizeof line)
+                            k += snprintf(line + k, sizeof line - k, " (tick start->staged %.1f/%.1f)",
+                                          (double)pf.sum_pre_cyc / n / mhz, (double)pf.max_pre_cyc / mhz);
+                    }
+                    // cost of one esp_timer_get_time() (several are inside the sections above), measured here on Core 1
+                    uint32_t c0, c1;
+                    __asm__ __volatile__("rsr %0, ccount" : "=a"(c0));
+                    for (int r = 0; r < 100; r++) (void)esp_timer_get_time();
+                    __asm__ __volatile__("rsr %0, ccount" : "=a"(c1));
+                    serial_reply("%s; whole tick %.1f/%.1f; one esp_timer_get_time() %.2f us\r\n", line,
+                                  (double)pf.sum_all_cyc / n / mhz, (double)pf.max_all_cyc / mhz,
+                                  (double)(c1 - c0) / 100.0 / mhz);
                 }
 #endif
             } else if ((cmd->arg[0] == '0' || cmd->arg[0] == '1') && cmd->arg[1] == 0) {

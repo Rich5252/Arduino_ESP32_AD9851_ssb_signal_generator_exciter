@@ -6698,6 +6698,30 @@ In the same log, in RX shortly after a `{F14080000}` and about 1 s before an FT8
 
 - 2026-11-12, user decision: sensor-fault trip only on repeated bad reads. `TEMP_TRIP_FAULT_WINDOWS 3` (config.h): a -99 (open/shorted) temperature must appear in 3 consecutive averages (~0.75 s) before it trips. The streak is counted on every average, TX on or off, and a good reading clears it. Over-temperature still trips on the first average. Pure helper `slow_adc_temp_trip_check_streak()` in slow_adc_conv; host test 990 checks pass. The all-zero average itself is still unexplained; the SWR rules are unchanged (an all-zero average reads as no forward power, so it cannot trip SWR). Uncompiled for the ESP32.
 
+### 2026-11-12 - Where the tick time goes: review of what dsp_task does in every mode (code reading, no measurement)
+
+User question: is it really just the extra mode logic? Probably not - that is only a few us. What every full tick does today, in every mode:
+- Before the staging point:
+  - wake latency (alarm on Core 1 -> dsp_task on Core 0), not measured;
+  - envelope_interp_on_full_tick (PWM write of the previous tick);
+  - tx_control_tick (+ digi_tick);
+  - the ADC read + resampler + DC block + instrumentation_record_adc;
+  - ssb_dsp_process_sample (V breakdown max: audio_fx 10, fir 12, atan2 2, sqrt 2 us);
+  - envelope floor / gdeq / ampeq / ALC / softlimit;
+  - instrumentation_record_envelope, tx_level_apply, predistort / PWM map, relative_delay_apply, carrier_output_compute_tx_freq;
+  - three esp_timer_get_time() calls (t_start, t_adc_done, t_dsp_done).
+- After the staging point: diagnostics_set_tx_info (jump log / null-bias bookkeeping), envelope_output_submit_dac_sample, diagnostics_set_envelope_freqdev, esp_timer_get_time (t_write_done), phase-timing and jump-busy recording.
+Things that look avoidable (estimates, not measured):
+1. envelope_output_submit_dac_sample() calls xQueueOverwrite() every 2nd tick (DAC_TARGET_UPDATE_RATE_HZ 10 kHz), but the MCP4725 is not fitted and dac_task is not even created (dac_task_enabled 0). A FreeRTOS queue call takes a critical section with interrupts masked - probably a few us each, for nothing.
+2. In CW and the digital modes the whole mic chain (ADC resample, ssb_dsp, gdeq / ampeq / ALC / softlimit) is computed and then overwritten by the carrier override - probably 20-30 us per tick. Kept "so filter state stays warm"; the ADC FIFO still needs draining, but the DSP itself could be skipped.
+3. esp_timer_get_time() reads the system timer through peripheral registers (estimated 0.5-1 us each); there are 4 per tick plus the 2 new stage-latency ones and 1 in the ISR. For timings inside dsp_task the CPU cycle counter (one instruction) would do.
+4. The per-tick diagnostics (jump log, null-bias, phase timings) are permanent; useful in the investigation phase, but a cost on every tick.
+Suggested first step: a profiling build that times each section with the cycle counter (mean and max) and prints them in `{K}`, then decide what to cut. Not started - awaiting the user.
+
+- 2026-11-12: profiling build made at the user's request (`TICK_PROFILE_ENABLED 1`, uncompiled). 12 cycle-counter marks per full tick in dsp_task, each one `rsr ccount` instruction. Sections: pwm / txctl / adc / ssb / envchain / level / reldelay / stage (= tick start -> staged), then diag / dacq / tail. Wake latency comes from the stage-latency alarm timestamp. The bookkeeping runs after the last mark. `{K}` prints mean/max us per section since the previous `{K}`, plus the cost of one esp_timer_get_time(), measured with 100 calls on Core 1. Next: `{K}` pairs in USB RX, USB TX (speech), CW and FT8, then decide what to cut.
+
+- 2026-11-12 delivery fault: host tests `test_digi_gen.cpp` and `test_slow_adc_conv.cpp` were delivered into the flat "Claude outputs" folder, ended up in the sketch root, and the Arduino build failed with "multiple definition of main". From now on host tests are delivered to "Claude outputs\host_tests\" only. The user should delete both files from the sketch folder; they belong in its host_tests subfolder, which the Arduino IDE does not compile.
+
 ## Where to resume
 
 The null-crossing bias itself is well-characterized and, per the "likely

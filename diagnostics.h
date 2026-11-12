@@ -217,6 +217,21 @@ void IRAM_ATTR diagnostics_record_isr_stale_commits(uint32_t stale_commit_count)
 void IRAM_ATTR diagnostics_record_stage_latency(uint32_t us);
 void diagnostics_get_stage_latency_bins(uint32_t bins[STAGE_LAT_BINS]);
 uint32_t diagnostics_stage_latency_take_max(void);   // returns the max and restarts it
+// 2026-11-12 tick profile (TICK_PROFILE_ENABLED): dsp_task passes the 12 cycle-counter marks of a full tick
+// (TICK_PROF_SECTIONS = 11 sections between them) and the wake latency in us; the reader takes mean/max since its
+// previous take (the recorder restarts the sums when it sees the reader's request).
+#define TICK_PROF_MARKS    12
+#define TICK_PROF_SECTIONS (TICK_PROF_MARKS - 1)
+void IRAM_ATTR diagnostics_record_tick_profile(const uint32_t marks[TICK_PROF_MARKS], uint32_t wake_us);
+typedef struct {
+    uint32_t count;                         // ticks
+    uint64_t sum_cyc[TICK_PROF_SECTIONS];
+    uint32_t max_cyc[TICK_PROF_SECTIONS];
+    uint64_t sum_pre_cyc;   uint32_t max_pre_cyc;    // marks 0..8: tick start -> value staged
+    uint64_t sum_all_cyc;   uint32_t max_all_cyc;    // marks 0..11: whole tick
+    uint64_t sum_wake_us;   uint32_t max_wake_us;    // alarm -> tick start
+} tick_profile_t;
+void diagnostics_take_tick_profile(tick_profile_t *out);
 
 // 'J' serial command - dumps the aggregate near-null/total jump counts
 // plus each of the last JUMP_LOG_LEN qualifying events (oldest to newest)

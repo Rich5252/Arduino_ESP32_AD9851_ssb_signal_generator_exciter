@@ -1817,6 +1817,36 @@ static uint32_t s_last_rate_print_ms = 0;
 uint32_t diagnostics_get_late_tick_count(void) { return s_dbg_late_tick_count; }
 uint32_t diagnostics_get_stale_commit_count(void) { return s_dbg_isr_stale_commit_count; }
 
+// ---- 2026-11-12 tick profile, see diagnostics.h. Single writer (dsp_task); the reader copies, then asks for a restart.
+static tick_profile_t     s_prof;
+static volatile uint32_t  s_prof_reset_req = 0, s_prof_reset_seen = 0;
+void IRAM_ATTR diagnostics_record_tick_profile(const uint32_t marks[TICK_PROF_MARKS], uint32_t wake_us)
+{
+    if (s_prof_reset_seen != s_prof_reset_req) {
+        s_prof_reset_seen = s_prof_reset_req;
+        for (int i = 0; i < TICK_PROF_SECTIONS; i++) { s_prof.sum_cyc[i] = 0; s_prof.max_cyc[i] = 0; }
+        s_prof.count = 0;
+        s_prof.sum_pre_cyc = 0; s_prof.max_pre_cyc = 0;
+        s_prof.sum_all_cyc = 0; s_prof.max_all_cyc = 0;
+        s_prof.sum_wake_us = 0; s_prof.max_wake_us = 0;
+    }
+    for (int i = 0; i < TICK_PROF_SECTIONS; i++) {
+        uint32_t d = marks[i + 1] - marks[i];
+        s_prof.sum_cyc[i] += d;
+        if (d > s_prof.max_cyc[i]) s_prof.max_cyc[i] = d;
+    }
+    uint32_t pre = marks[8] - marks[0], all = marks[TICK_PROF_MARKS - 1] - marks[0];
+    s_prof.sum_pre_cyc += pre; if (pre > s_prof.max_pre_cyc) s_prof.max_pre_cyc = pre;
+    s_prof.sum_all_cyc += all; if (all > s_prof.max_all_cyc) s_prof.max_all_cyc = all;
+    s_prof.sum_wake_us += wake_us; if (wake_us > s_prof.max_wake_us) s_prof.max_wake_us = wake_us;
+    s_prof.count++;
+}
+void diagnostics_take_tick_profile(tick_profile_t *out)
+{
+    *out = s_prof;                                   // may be torn by a tick in progress - fine for a mean/max readout
+    s_prof_reset_req = s_prof_reset_req + 1;
+}
+
 // ---- 2026-11-12 stage latency, see diagnostics.h. Single writer (dsp_task); the reader only resets the max. ----
 static volatile uint32_t s_stage_lat_bins[STAGE_LAT_BINS];
 static volatile uint32_t s_stage_lat_max = 0;

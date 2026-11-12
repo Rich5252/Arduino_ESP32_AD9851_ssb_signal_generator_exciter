@@ -529,6 +529,14 @@ static bool IRAM_ATTR on_timer_alarm(gptimer_handle_t timer, const gptimer_alarm
 // working around it by leaving dac_task off. Every module function called
 // from here is itself IRAM_ATTR for the same reason - see each module's
 // header.
+#if TICK_PROFILE_ENABLED
+// 2026-11-12 tick profile: CPU cycle counter (Core 0's own; dsp_task never changes core), one instruction
+static inline uint32_t prof_ccount(void) { uint32_t c; __asm__ __volatile__("rsr %0, ccount" : "=a"(c)); return c; }
+#define PROF_MARK(i) (prof_marks[(i)] = prof_ccount())
+#else
+#define PROF_MARK(i) ((void)0)
+#endif
+
 static void IRAM_ATTR dsp_task(void* arg)
 {
     // Simple DC-blocking single-pole high-pass state (mic path only).
@@ -846,6 +854,11 @@ static void IRAM_ATTR dsp_task(void* arg)
         digitalWrite(TIMING_DEBUG_GPIO, HIGH);
 #endif
         int64_t t_start_us = esp_timer_get_time();
+#if TICK_PROFILE_ENABLED
+        uint32_t prof_marks[TICK_PROF_MARKS];
+        PROF_MARK(0);
+        for (int pi = 1; pi < TICK_PROF_MARKS; pi++) prof_marks[pi] = prof_marks[0];   // unreached marks = 0 cycles
+#endif
 #if AD9851_ATTACHED && AD9851_ISR_WRITE_ENABLED && STAGE_LATENCY_DIAG_ENABLED
         const uint32_t tick_alarm_us = s_isr_alarm_us;   // this tick's alarm (taken now, before the next one fires)
 #endif
@@ -888,7 +901,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // this refactor is a verbatim move.
         // 2026-11-10 TX sequencer (tx_control.h): key/PTT inputs, T/R sequencing, RF gate - sample-accurate, every
         // full tick. Returns true in CW mode: this tick sends a steady carrier (injected after soft-limit below).
+        PROF_MARK(1);                                    // profile: previous tick's PWM write done
         const bool cw_carrier = tx_control_tick();
+        PROF_MARK(2);                                    // profile: TX sequencer (+ digital generator) done
         audio_source_t src = dsp_state_get_audio_source();
 
         float sample;
@@ -927,6 +942,7 @@ static void IRAM_ATTR dsp_task(void* arg)
 #endif
         }
         int64_t t_adc_done_us = esp_timer_get_time();
+        PROF_MARK(3);                                    // profile: audio source (mic ADC read + resample) done
 
         float freq_dev_hz = 0.0f;
         float envelope = 0.0f;
@@ -941,6 +957,7 @@ static void IRAM_ATTR dsp_task(void* arg)
             ssb_dsp_process_sample(dsp_state_get_ssb(), sample, dsp_state_get_sideband(), &freq_dev_hz, &envelope);
         }
         int64_t t_dsp_done_us = esp_timer_get_time();
+        PROF_MARK(4);                                    // profile: SSB processing done
 
         // 2026-09-16, later still: raw, pre-shaping, pre-delay snapshot of
         // this tick's own freq_dev_hz/envelope, straight out of the block
@@ -994,6 +1011,7 @@ static void IRAM_ATTR dsp_task(void* arg)
         // as gdeq/ampeq above): each function itself no-ops when disabled.
         envelope = envelope_alc_process(envelope);
         envelope = envelope_softlimit_process(envelope);
+        PROF_MARK(5);                                    // profile: envelope chain (floor/gdeq/ampeq/ALC/softlimit) done
         if (cw_carrier) {
             // CW (tx_control.h): steady carrier at the carrier frequency, envelope = 100 %; keying edges and {L} are
             // applied by tx_level_apply() just below. The DSP above still runs so its filter state stays warm.
@@ -1027,6 +1045,7 @@ static void IRAM_ATTR dsp_task(void* arg)
         }
         if (envelope < 0.0f) envelope = 0.0f;
         if (envelope > 1.0f) envelope = 1.0f;
+        PROF_MARK(6);                                    // profile: carrier override, level, predistort/PWM map done
 
         // PWM write goes FIRST now, before the AD9851 SPI transfer -
         // deliberately, not incidentally. ledc_set_duty()+ledc_update_duty()
@@ -1067,6 +1086,7 @@ static void IRAM_ATTR dsp_task(void* arg)
                               &envelope_at_freq_time, &envelope_at_freq_time_min,
                               &raw_freq_dev_near, &raw_freq_dev_far);
 #endif
+        PROF_MARK(7);                                    // profile: relative delay done
 
         // t_start_us (captured at the very top of this tick, before any
         // DSP processing) is passed through so envelope_interp's ramp can
@@ -1155,12 +1175,14 @@ static void IRAM_ATTR dsp_task(void* arg)
         diagnostics_record_isr_stale_commits(s_stale_commit_count);
 #endif
 #endif
+        PROF_MARK(8);                                    // profile: tx_freq computed and staged for the ISR
 
         diagnostics_set_tx_info(delayed_freq_dev_hz, delayed_envelope, envelope_at_freq_time,
                                  envelope_at_freq_time_min, raw_freq_dev_near, raw_freq_dev_far,
                                  raw_freq_dev_current, raw_envelope_current,
                                  tx_freq);
 #endif
+        PROF_MARK(9);                                    // profile: diagnostics_set_tx_info done
 
         // Non-blocking, always succeeds - overwrites whatever was there.
         // dac_task will pick up the latest value whenever it next runs;
@@ -1171,6 +1193,7 @@ static void IRAM_ATTR dsp_task(void* arg)
         // envelope, same as the original - only the PWM (RSET) output
         // above is relative-delayed.
         envelope_output_submit_dac_sample(envelope);
+        PROF_MARK(10);                                   // profile: MCP4725 queue submit done
 
         diagnostics_set_envelope_freqdev(envelope, freq_dev_hz);
 
@@ -1192,6 +1215,14 @@ static void IRAM_ATTR dsp_task(void* arg)
         // finally known - see diagnostics.h/.cpp for the full mechanism.
         // A no-op on every ordinary tick.
         diagnostics_record_jump_busy_us(busy_us);
+#if TICK_PROFILE_ENABLED
+        PROF_MARK(11);                                   // profile: tail (diagnostics, timings) done
+#if AD9851_ATTACHED && AD9851_ISR_WRITE_ENABLED && STAGE_LATENCY_DIAG_ENABLED
+        diagnostics_record_tick_profile(prof_marks, (uint32_t)t_start_us - tick_alarm_us);
+#else
+        diagnostics_record_tick_profile(prof_marks, 0);
+#endif
+#endif
 
 #if TIMING_DEBUG_ENABLED
         digitalWrite(TIMING_DEBUG_GPIO, LOW);

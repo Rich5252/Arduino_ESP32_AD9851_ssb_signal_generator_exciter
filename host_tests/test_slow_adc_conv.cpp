@@ -119,6 +119,22 @@ int main()
     check(slow_adc_temp_trip_check(-99.0f, 54.0f, false) == TEMP_TRIP_NONE, "temp: sensor fault ignored when disabled");
     check(slow_adc_temp_trip_check(-20.0f, 54.0f, true) == TEMP_TRIP_NONE, "temp: genuine cold is not a fault");
 
+    // 2026-11-12 streak version: a sensor fault needs 3 consecutive averages; over-temperature trips at once
+    {
+        uint32_t st = 0;
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, true, &st, 3) == TEMP_TRIP_NONE && st == 1, "streak: 1st fault ignored");
+        check(slow_adc_temp_trip_check_streak(25.0f, 54.0f, true, &st, 3) == TEMP_TRIP_NONE && st == 0, "streak: good reading clears it");
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, true, &st, 3) == TEMP_TRIP_NONE, "streak: fault 1");
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, true, &st, 3) == TEMP_TRIP_NONE, "streak: fault 2");
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, true, &st, 3) == TEMP_TRIP_SENSOR_FAULT, "streak: fault 3 trips");
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, true, &st, 3) == TEMP_TRIP_SENSOR_FAULT, "streak: stays tripping");
+        check(slow_adc_temp_trip_check_streak(60.0f, 54.0f, true, &st, 3) == TEMP_TRIP_OVER && st == 0, "streak: over-temp at once");
+        st = 5;
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, false, &st, 3) == TEMP_TRIP_NONE, "streak: faults ignored when disabled");
+        st = 0;
+        check(slow_adc_temp_trip_check_streak(-99.0f, 54.0f, true, &st, 1) == TEMP_TRIP_SENSOR_FAULT, "streak: 1 window = old behaviour");
+    }
+
     printf("%d checks, %d failed\n", checks, fails);
     return fails ? 1 : 0;
 }
