@@ -4829,6 +4829,40 @@ Suggested first step: a profiling build that times each section with the cycle c
 
 - 2026-11-12 delivery fault: host tests `test_digi_gen.cpp` and `test_slow_adc_conv.cpp` were delivered into the flat "Claude outputs" folder, ended up in the sketch root, and the Arduino build failed with "multiple definition of main". From now on host tests are delivered to "Claude outputs\host_tests\" only. The user should delete both files from the sketch folder; they belong in its host_tests subfolder, which the Arduino IDE does not compile.
 
+### 2026-11-12 - Tick profile results (bench): where the 50 us goes
+
+`{K}` profile, mean/max us. USB RX 64 s and USB TX 53 s are essentially identical; CW (RX state) 5 s; FT8 TX 5 s:
+- wake (alarm -> tick start) 10.4/18, all modes. This includes the ISR's own esp_timer read and the t_start read.
+- Before staging:
+  - pwm 0.9;
+  - txctl 1.1-1.2, FT8 2.4 (digi_tick about 1.2);
+  - adc 4.1 (includes one esp_timer read);
+  - ssb 15.0/25 - the biggest single item;
+  - envchain 1.0, level 1.2, reldelay 1.0, stage 1.2 (stage includes one esp_timer read).
+  - Tick start -> staged: 25.5 mean / 42 max.
+- After staging: diag (diagnostics_set_tx_info) 4-5/12.8, dacq 0.8, tail 1.2-1.4.
+- Whole tick 31.5-32.8 mean / 41-50 max.
+- One esp_timer_get_time() costs 1.6-1.9 us (measured).
+- Occasional 7-17 us maxima land in random cheap sections (envchain 17.4, level 8, reldelay 8, stage 8.6). The pattern looks like something pre-empting dsp_task on Core 0 (an interrupt, e.g. the FreeRTOS tick or the ADC DMA) rather than those functions themselves - unconfirmed.
+- Stale commits in these runs: 0.02-0.2/s.
+Reading: about 10 us of every tick is the cross-core wake (Core 1 ISR -> Core 0 task). That is the price of letting the AD9851 bit-bang run in parallel, so it stays. The SSB chain is 15 us. 4 esp_timer reads before staging cost about 6.5 us.
+Options with estimated savings (none done, awaiting the user):
+- (A) Replace the in-tick esp_timer reads after t_start (t_adc_done, t_dsp_done, the stage-latency read, t_write_done) with the cycle counter. t_start stays: envelope_interp and the gap / stage-latency statistics need microseconds on the shared clock. About 5 us earlier staging, 6.5 us less per tick, no behaviour change.
+- (B) Drop the MCP4725 queue submit when MCP4725_I2C_ENABLED is 0: 0.8 us.
+- (C) CW / digital: skip ssb + the envelope chain (keep draining the ADC): about 16 us in those modes.
+- (D) Runtime switch for the post-staging investigation diagnostics: 4-5 us (up to 13).
+
+### 2026-11-12 - Tick tidy-up: A + B + C + D (uncompiled; ssb_dsp.c syntax-checked both ways)
+
+User: disable the older diagnostics, keep only what the timing investigation needs, and do the carrier-mode skip.
+- (A) The in-tick times after t_start now come from the CPU cycle counter (tick_ccount(), `rsr ccount`; s_cyc_per_us = getCpuFrequencyMhz() set before the task starts). That replaces t_adc_done / t_dsp_done / t_write_done and the stage-latency esp_timer read; stage latency = (t_start - alarm) + cycles since t_start. Phase timings, max_busy and overruns are unchanged in meaning. t_start stays an esp_timer read (envelope_interp and the gap stats use microseconds).
+- (B) envelope_output_submit_dac_sample() is called only when MCP4725_I2C_ENABLED && dac_task_enabled.
+- (C) `CARRIER_MODES_SKIP_DSP 1`: when tx_control_tick() says carrier (CW or digital), ssb_dsp_process_sample and the envelope chain (floor / gdeq / ampeq / ALC / softlimit) are skipped. The mic ADC read still runs (FIFO drained, meter live). The filter states freeze and resume on return to a voice mode; a mode change also loads the preset - possible small transient, unverified.
+- (D) `LEGACY_TICK_DIAGS_ENABLED 0`: diagnostics_set_tx_info() keeps only the two stores `V` uses (tx_freq, delayed freq_dev). The EMAs / slow-trace, J/K/H/F capture, jump log, held-freq and near-null bookkeeping are compiled out, as is the jump-log finaliser.
+- (D) `SSB_DSP_DIAG_ENABLED 0` (ssb_dsp.h): the five esp_timer reads per sample inside ssb_dsp_process_sample (the audio_fx/fir/atan2/sqrt breakdown, about 8 us of the 15 us "ssb" section) and the null-bias sums are compiled out.
+- Kept: tick gap / late ticks, phase timings / max_busy / overruns, stale commits, stage-latency histogram, tick profile.
+- Expected (estimates), tick start -> staged: USB about 25.5 -> about 12-14 us mean (ssb about 15 -> about 7, 3 fewer timer reads); CW/digital lower again. Whole tick about 33 -> about 18-20 us. To check with the `{K}` profile in the same four cases.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

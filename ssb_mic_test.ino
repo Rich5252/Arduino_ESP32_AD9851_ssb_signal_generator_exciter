@@ -529,10 +529,12 @@ static bool IRAM_ATTR on_timer_alarm(gptimer_handle_t timer, const gptimer_alarm
 // working around it by leaving dac_task off. Every module function called
 // from here is itself IRAM_ATTR for the same reason - see each module's
 // header.
+// 2026-11-12: CPU cycle counter (Core 0's own; dsp_task never changes core) - one instruction, against ~1.7 us for an
+// esp_timer_get_time() (measured). Used for every in-tick time after t_start; s_cyc_per_us is set in setup().
+static inline uint32_t tick_ccount(void) { uint32_t c; __asm__ __volatile__("rsr %0, ccount" : "=a"(c)); return c; }
+static uint32_t s_cyc_per_us = 240;
 #if TICK_PROFILE_ENABLED
-// 2026-11-12 tick profile: CPU cycle counter (Core 0's own; dsp_task never changes core), one instruction
-static inline uint32_t prof_ccount(void) { uint32_t c; __asm__ __volatile__("rsr %0, ccount" : "=a"(c)); return c; }
-#define PROF_MARK(i) (prof_marks[(i)] = prof_ccount())
+#define PROF_MARK(i) (prof_marks[(i)] = tick_ccount())
 #else
 #define PROF_MARK(i) ((void)0)
 #endif
@@ -853,7 +855,8 @@ static void IRAM_ATTR dsp_task(void* arg)
 #if TIMING_DEBUG_ENABLED
         digitalWrite(TIMING_DEBUG_GPIO, HIGH);
 #endif
-        int64_t t_start_us = esp_timer_get_time();
+        int64_t t_start_us = esp_timer_get_time();   // the one timer read per tick: envelope_interp and the gap stats need us
+        const uint32_t c_start = tick_ccount();
 #if TICK_PROFILE_ENABLED
         uint32_t prof_marks[TICK_PROF_MARKS];
         PROF_MARK(0);
@@ -941,7 +944,7 @@ static void IRAM_ATTR dsp_task(void* arg)
             sample = 0.0f;
 #endif
         }
-        int64_t t_adc_done_us = esp_timer_get_time();
+        const uint32_t c_adc_done = tick_ccount();   // 2026-11-12: was esp_timer_get_time() (t_adc_done_us)
         PROF_MARK(3);                                    // profile: audio source (mic ADC read + resample) done
 
         float freq_dev_hz = 0.0f;
@@ -953,10 +956,15 @@ static void IRAM_ATTR dsp_task(void* arg)
             test_signals_generate_fmtest(&freq_dev_hz, &envelope);
         } else if (src == AUDIO_SRC_AMTEST) {
             test_signals_generate_amtest(master_gain_linear, &envelope, &freq_dev_hz);
+#if CARRIER_MODES_SKIP_DSP
+        } else if (cw_carrier) {
+            // 2026-11-12: CW and the digital modes send a carrier (override below), so the SSB chain's result would be
+            // thrown away - skip it (~15 us). The mic ADC is still read above (FIFO drained, level meter live).
+#endif
         } else {
             ssb_dsp_process_sample(dsp_state_get_ssb(), sample, dsp_state_get_sideband(), &freq_dev_hz, &envelope);
         }
-        int64_t t_dsp_done_us = esp_timer_get_time();
+        const uint32_t c_dsp_done = tick_ccount();   // 2026-11-12: was esp_timer_get_time() (t_dsp_done_us)
         PROF_MARK(4);                                    // profile: SSB processing done
 
         // 2026-09-16, later still: raw, pre-shaping, pre-delay snapshot of
@@ -976,6 +984,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // the RAW envelope straight out of the block above, before
         // gdeq/predistort reshape it, so the clamp decision reflects the
         // actual signal. Off by default (floor 0.0), toggle via 'x'/'z'.
+#if CARRIER_MODES_SKIP_DSP
+        if (!cw_carrier) {   // 2026-11-12: envelope chain skipped in CW/digital too - its output is overridden below
+#endif
         envelope = envelope_floor_apply(envelope);
 
         // Envelope-path group-delay equalizer - see envelope_gdeq.h for
@@ -1011,6 +1022,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // as gdeq/ampeq above): each function itself no-ops when disabled.
         envelope = envelope_alc_process(envelope);
         envelope = envelope_softlimit_process(envelope);
+#if CARRIER_MODES_SKIP_DSP
+        }
+#endif
         PROF_MARK(5);                                    // profile: envelope chain (floor/gdeq/ampeq/ALC/softlimit) done
         if (cw_carrier) {
             // CW (tx_control.h): steady carrier at the carrier frequency, envelope = 100 %; keying edges and {L} are
@@ -1170,7 +1184,8 @@ static void IRAM_ATTR dsp_task(void* arg)
 #if AD9851_ISR_WRITE_ENABLED
         s_stage_seq++;   // see s_stage_seq's own declaration comment
 #if STAGE_LATENCY_DIAG_ENABLED
-        diagnostics_record_stage_latency((uint32_t)esp_timer_get_time() - tick_alarm_us);   // alarm -> staged, us
+        // alarm -> staged, us: wake (t_start on the shared clock) + cycles since t_start (2026-11-12: no 2nd timer read)
+        diagnostics_record_stage_latency(((uint32_t)t_start_us - tick_alarm_us) + (tick_ccount() - c_start) / s_cyc_per_us);
 #endif
         diagnostics_record_isr_stale_commits(s_stale_commit_count);
 #endif
@@ -1192,7 +1207,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // affect the timing analysis above at all. Uses the UN-delayed
         // envelope, same as the original - only the PWM (RSET) output
         // above is relative-delayed.
-        envelope_output_submit_dac_sample(envelope);
+#if MCP4725_I2C_ENABLED && dac_task_enabled
+        envelope_output_submit_dac_sample(envelope);   // 2026-11-12: only when the MCP4725 and its task exist (was always)
+#endif
         PROF_MARK(10);                                   // profile: MCP4725 queue submit done
 
         diagnostics_set_envelope_freqdev(envelope, freq_dev_hz);
@@ -1201,12 +1218,13 @@ static void IRAM_ATTR dsp_task(void* arg)
         // Serial/printf here - this stays cheap enough to leave enabled
         // permanently rather than only turning it on when chasing a
         // specific problem.
-        int64_t t_write_done_us = esp_timer_get_time();
-        uint32_t busy_us  = (uint32_t)(t_write_done_us - t_start_us);
+        // 2026-11-12: phase times from the cycle counter (were three more esp_timer_get_time() reads)
+        const uint32_t c_write_done = tick_ccount();
+        uint32_t busy_us  = (c_write_done - c_start) / s_cyc_per_us;
 #if DIAG_HOTPATH_RECORDING_ENABLED
-        uint32_t adc_us   = (uint32_t)(t_adc_done_us   - t_start_us);
-        uint32_t dsp_us   = (uint32_t)(t_dsp_done_us   - t_adc_done_us);
-        uint32_t write_us = (uint32_t)(t_write_done_us - t_dsp_done_us);
+        uint32_t adc_us   = (c_adc_done   - c_start)    / s_cyc_per_us;
+        uint32_t dsp_us   = (c_dsp_done   - c_adc_done) / s_cyc_per_us;
+        uint32_t write_us = (c_write_done - c_dsp_done) / s_cyc_per_us;
         diagnostics_record_phase_timings(adc_us, dsp_us, write_us, busy_us);
 #endif
 
@@ -1214,7 +1232,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         // diagnostics_set_tx_info() above flagged one) now that busy_us is
         // finally known - see diagnostics.h/.cpp for the full mechanism.
         // A no-op on every ordinary tick.
+#if LEGACY_TICK_DIAGS_ENABLED
         diagnostics_record_jump_busy_us(busy_us);
+#endif
 #if TICK_PROFILE_ENABLED
         PROF_MARK(11);                                   // profile: tail (diagnostics, timings) done
 #if AD9851_ATTACHED && AD9851_ISR_WRITE_ENABLED && STAGE_LATENCY_DIAG_ENABLED
@@ -1463,6 +1483,8 @@ void setup()
     // eliminated the long-standing ~7.7Hz two-tone comb). Kept as a
     // compile-time-only flag for the same reason this section's earlier
     // failures argue for caution in this exact seam.
+    s_cyc_per_us = getCpuFrequencyMhz();   // 2026-11-12: cycle counter -> us for the in-tick timings
+    if (s_cyc_per_us == 0) s_cyc_per_us = 240;
     xTaskCreatePinnedToCore(dsp_task, "ssb_dsp_task", 4096, NULL,
                              configMAX_PRIORITIES - 2, &s_dsp_task, 0);
 

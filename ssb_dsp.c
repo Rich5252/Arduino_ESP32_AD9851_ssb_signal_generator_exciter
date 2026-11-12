@@ -1081,7 +1081,9 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
     // the stage that was missing - see ssb_dsp_set_mic_gain_db()'s doc
     // comment in ssb_dsp.h. Single multiply; mic_gain_linear==1.0f (the
     // default) costs nothing worth measuring.
+#if SSB_DSP_DIAG_ENABLED
     int64_t t0 = esp_timer_get_time();
+#endif
     audio_sample *= handle->mic_gain_linear;
 
     // 2026-09-25/26: Mic Squelch DETECTOR tap - deliberately here, reading
@@ -1146,9 +1148,11 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
     // is a deliberate choice, not the transient-overshoot bug being
     // guarded against).
     audio_sample *= handle->master_gain_linear;
+#if SSB_DSP_DIAG_ENABLED
     int64_t t1 = esp_timer_get_time();
     uint32_t audio_fx_us = (uint32_t)(t1 - t0);
     if (audio_fx_us > handle->max_audio_fx_us) handle->max_audio_fx_us = audio_fx_us;
+#endif
 
     // Push new sample into circular delay line (most recent at delay_head).
     // Flushed here, not just on readback below, since a denormal value
@@ -1214,27 +1218,33 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
         }
     }
     Q = flush_denorm(Q);
+#if SSB_DSP_DIAG_ENABLED
     int64_t t2 = esp_timer_get_time();
     uint32_t fir_us = (uint32_t)(t2 - t1);
     if (fir_us > handle->max_fir_us) handle->max_fir_us = fir_us;
+#endif
 
 #if SSB_DSP_FAST_TRIG
     float phase = fast_atan2(Q, I);
 #else
     float phase = atan2f(Q, I);
 #endif
+#if SSB_DSP_DIAG_ENABLED
     int64_t t3 = esp_timer_get_time();
     uint32_t atan2_us = (uint32_t)(t3 - t2);
     if (atan2_us > handle->max_atan2_us) handle->max_atan2_us = atan2_us;
+#endif
 
 #if SSB_DSP_FAST_TRIG
     float envelope = fast_sqrt(I * I + Q * Q);
 #else
     float envelope = sqrtf(I * I + Q * Q);
 #endif
+#if SSB_DSP_DIAG_ENABLED
     int64_t t4 = esp_timer_get_time();
     uint32_t sqrt_us = (uint32_t)(t4 - t3);
     if (sqrt_us > handle->max_sqrt_us) handle->max_sqrt_us = sqrt_us;
+#endif
 
     // 2026-09-26: Mic Squelch gate, applied HERE - to the computed ENVELOPE,
     // post-Hilbert - rather than pre-Hilbert to audio_sample. See
@@ -1279,6 +1289,7 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
         // dphi_sum/near_null_dphi_sum are kept for mechanistic diagnosis
         // (which samples the effect concentrates at) - see
         // ssb_dsp_null_bias_stats_t in ssb_dsp.h for both.
+#if SSB_DSP_DIAG_ENABLED   // 2026-11-12: null-bias sums are an older diagnostic, off by default (ssb_dsp.h)
         handle->dphi_sum += dphi;
         handle->dphi_sample_count++;
         if (envelope < handle->null_bias_threshold) {
@@ -1288,6 +1299,7 @@ void IRAM_ATTR ssb_dsp_process_sample(ssb_dsp_handle_t handle,
         float env2 = envelope * envelope;
         handle->env2_dphi_sum += env2 * dphi;
         handle->env2_sum += env2;
+#endif
     }
     handle->prev_phase = phase;
     handle->have_prev_phase = true;

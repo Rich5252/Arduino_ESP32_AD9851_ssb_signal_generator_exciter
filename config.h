@@ -158,6 +158,17 @@
 // mark, 12 marks per tick; the bookkeeping runs after the tick's last mark). {K} prints mean/max per section since the
 // previous {K}. 0 removes it.
 #define TICK_PROFILE_ENABLED         1
+// 2026-11-12 tidy-up of the per-tick work (user: keep only what the timing investigation needs):
+// CW and the digital modes send a carrier, so skip the SSB chain and the envelope chain in those modes (~16 us/tick).
+// The mic ADC is still read every tick (FIFO drained, level meter live). Their filter states are left as they were and
+// resume when a voice mode is selected again.
+#define CARRIER_MODES_SKIP_DSP       1
+// The older per-tick investigation diagnostics: diagnostics_set_tx_info()'s heavy part (frequency EMAs / slow-trace,
+// freq/envelope capture for J/K/H/F, jump log, held-frequency and near-null bookkeeping) and the jump-log finaliser.
+// 0 = off (2026-11-12): `V` still shows tx_freq/freq_dev, but the slow-trace / jump-log / capture / held-freq readouts
+// stay empty. The ssb_dsp.c per-sample profile and null-bias sums are switched separately (SSB_DSP_DIAG_ENABLED in
+// ssb_dsp.h). Kept: tick gap/late, phase timings/max_busy/overruns, stale commits, stage latency, tick profile.
+#define LEGACY_TICK_DIAGS_ENABLED    0
 
 #if AD9851_ISR_WRITE_ENABLED && !AD9851_ATTACHED
 #error "AD9851_ISR_WRITE_ENABLED requires AD9851_ATTACHED - there's no AD9851 to write to otherwise."

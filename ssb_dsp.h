@@ -1,6 +1,14 @@
 #pragma once
 
 #include <stdint.h>
+
+// 2026-11-12: older per-sample diagnostics inside ssb_dsp_process_sample(): the audio_fx/fir/atan2/sqrt timing
+// breakdown (five esp_timer_get_time() reads per sample, ~1.7 us each - most of the ~15 us the call took on the bench)
+// and the null-bias sums. 0 = off: `V`'s "dsp breakdown" and "[dsp] null_bias" lines then read 0. The tick profile
+// ({K}, config.h TICK_PROFILE_ENABLED) times the whole call instead.
+#ifndef SSB_DSP_DIAG_ENABLED
+#define SSB_DSP_DIAG_ENABLED 0
+#endif
 #include <stdbool.h>
 #include "esp_err.h"
 #include "esp_attr.h"

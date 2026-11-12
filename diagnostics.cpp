@@ -879,6 +879,7 @@ void IRAM_ATTR diagnostics_set_tx_info(float delayed_freq_dev_hz, float delayed_
     (void)delayed_envelope;   // stored nowhere - NOT time-matched to delayed_freq_dev_hz once delay
                               // is nonzero (see relative_delay.h) - envelope_at_freq_time below is
                               // the correct pairing, and is what the energy-weighted EMA now uses.
+#if LEGACY_TICK_DIAGS_ENABLED   // 2026-11-12: older per-tick investigation diagnostics, off by default (config.h)
 
     // 2026-09-17: 'F' full-rate freq/env capture - see
     // diagnostics_freqenv_capture_arm()'s declaration comment (diagnostics.h)
@@ -1216,6 +1217,10 @@ void IRAM_ATTR diagnostics_set_tx_info(float delayed_freq_dev_hz, float delayed_
     }
     s_dbg_prev_tx_freq = tx_freq;
     s_dbg_have_prev_tx_freq = true;
+#else
+    (void)envelope_at_freq_time; (void)envelope_at_freq_time_min; (void)raw_freq_dev_near; (void)raw_freq_dev_far;
+    (void)raw_freq_dev_current; (void)raw_envelope_current;
+#endif   // LEGACY_TICK_DIAGS_ENABLED
 #else
     (void)delayed_freq_dev_hz;
     (void)delayed_envelope;
