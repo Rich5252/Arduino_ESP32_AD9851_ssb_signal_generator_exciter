@@ -8,8 +8,17 @@
 #include <string.h>
 #include <math.h>
 
-#ifndef DIGI_HOT
-#define DIGI_HOT                // tick-path attribute hook (nothing needed: dsp_task is a task, not an ISR)
+// Tick path placement (2026-11-12). On the ESP32 everything dsp_task calls must run from internal RAM (IRAM): code
+// in flash stalls whenever Core 1 activity has pushed it out of the shared cache (ssb_mic_test.ino, above
+// dsp_task). Bench 2026-11-12 with this module in flash: max_busy 61 us, 3 overruns (CW alone: 44 us). DIGI_HOT puts
+// a function in IRAM, DIGI_DATA puts constant tables the tick reads in DRAM. Nothing on a host build.
+#if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
+#include "esp_attr.h"
+#define DIGI_HOT  IRAM_ATTR
+#define DIGI_DATA DRAM_ATTR
+#else
+#define DIGI_HOT
+#define DIGI_DATA
 #endif
 
 #define fence_release() __atomic_thread_fence(__ATOMIC_RELEASE)
@@ -52,7 +61,7 @@ static const int LETTERS_SHIFT_CODE = 31, FIGURES_SHIFT_CODE = 27, CR_CODE = 8, 
 #define JTTY_MAX_FRAMES    16
 #define JTTY_MAX_DATA      (JTTY_MAX_FRAMES * JTTY_DATA_LEN)  // 736 symbols
 #define JTTY_BUF_BYTES     (JTTY_MAX_DATA / 4)                // 184 bytes
-static const uint8_t jttySync[JTTY_SYNC_LEN] = {0,2,2,3,0,0,3,2,1,3,1,2,0};   // Nano: from WSJT-X jtty_fec_mod.f90
+static const uint8_t DIGI_DATA jttySync[JTTY_SYNC_LEN] = {0,2,2,3,0,0,3,2,1,3,1,2,0};   // Nano: from WSJT-X jtty_fec_mod.f90
 
 // Nano Gaussian_G_Scaled[] (TXlink4_Nano.ino), used only by shape 0
 static const uint16_t Gaussian_G_Scaled[33] = {
@@ -130,7 +139,8 @@ static int  s_rt_phase = 0, s_rt_idx = 0, s_rt_pos = 0, s_rt_bit = 0, s_rt_code 
 static bool s_rt_ltrs = true;
 static char s_rt_text[MAX_MESSAGE_LENGTH];
 static uint32_t s_q_clear_seen = 0;
-static double   s_rt_t_us = 0, s_rt_bit_start_us = 0, s_rt_bit_end_us = 0;
+static uint32_t s_rt_t_us = 0, s_rt_bit_start_us = 0, s_rt_bit_end_us = 0;   // us since the start (integer: no
+                                                                                // software doubles in the tick)
 static int      s_rt_pending = -1;                    // next code, fetched when the stop bit starts (lookahead)
 // JTTY
 static uint32_t s_jt_total = 0;
@@ -140,10 +150,15 @@ static volatile uint32_t s_starts = 0, s_ends = 0, s_restarts = 0, s_aborts = 0,
 static volatile int      s_first_symbol = 0;
 
 // ======================================================================================================== helpers
-static int ticks_of_ms(long ms) { return (int)((int64_t)ms * (int64_t)s_cfg.tick_hz / 1000); }
-static long ms_of_ticks(uint32_t t) { return (long)((uint64_t)t * 1000u / s_cfg.tick_hz); }
+static uint32_t s_ticks_per_ms = 20;                  // tick_hz / 1000 (20 at 20 kHz), set by digi_init()
+static uint32_t s_tick_us = 50;                       // 1e6 / tick_hz
+static float    s_ticks_per_us = 0.02f;
+static int ticks_of_ms(long ms) { return (int)((int64_t)ms * (int64_t)s_cfg.tick_hz / 1000); }   // set-up only
+// tick path: 32-bit only (the S3 divides 32-bit in hardware, 64-bit in software)
+static inline DIGI_HOT long ms_of_ticks(uint32_t t) { return (long)(t / s_ticks_per_ms); }
+static inline DIGI_HOT uint32_t ticks_of_ms_fast(long ms) { return ms > 0 ? (uint32_t)ms * s_ticks_per_ms : 0; }
 
-bool digi_mode_is_digital(int mode)
+bool DIGI_HOT digi_mode_is_digital(int mode)                  // called every tick by tx_control_tick()
 {
     return mode == DIGI_MODE_RTTY || mode == DIGI_MODE_FT2 || mode == DIGI_MODE_FT4 || mode == DIGI_MODE_FT8 ||
            mode == DIGI_MODE_JTTY;
@@ -161,7 +176,7 @@ const char *digi_mode_name(int mode)
     }
 }
 
-static inline float phi_at(const digi_tab_t *t, int x)
+static inline DIGI_HOT float phi_at(const digi_tab_t *t, int x)
 {
     if (x <= -t->W) return t->phi[0];
     if (x >= t->W) return 1.0f;
@@ -170,7 +185,7 @@ static inline float phi_at(const digi_tab_t *t, int x)
 
 // Frequency for this tick: previous / current / next tone, erf steps centred on the symbol's start (u = 0) and end
 // (u = sym_len) boundaries. Continuous across a boundary when prev/cur/next shift along.
-static inline float tone_mix(void)
+static inline DIGI_HOT float tone_mix(void)
 {
     const digi_tab_t *t = s_rt;
     return s_cur + (s_cur - s_prev) * (phi_at(t, s_u) - 1.0f) + (s_next - s_cur) * phi_at(t, s_u - s_sym_len);
@@ -293,6 +308,14 @@ static BaudotEntry getBaudotCode(char c)
     }
 }
 
+// ESP32: the tick uses a lookup table filled from getBaudotCode() at init (a switch compiles to a jump table in
+// flash; the table lives in DRAM). Same results for every char value.
+static BaudotEntry DIGI_DATA s_baudot[256];
+static void build_baudot_table(void)
+{
+    for (int i = 0; i < 256; i++) s_baudot[i] = getBaudotCode((char)i);
+}
+
 // Nano rtty_queue.ino (enqueue in loop context, dequeue in the tick; clearQueue() is a request the tick applies)
 static bool enqueueMessage(const char *newText)
 {
@@ -310,7 +333,7 @@ static void clearQueue(void)
     fence_release();
     s_q_clear_req = s_q_clear_req + 1;
 }
-static void apply_queue_clear(void)                            // tick side
+static DIGI_HOT void apply_queue_clear(void)                   // tick side
 {
     if (s_q_clear_seen != s_q_clear_req) {
         s_q_clear_seen = s_q_clear_req;
@@ -318,21 +341,21 @@ static void apply_queue_clear(void)                            // tick side
         s_q_tail = s_q_clear_head;
     }
 }
-static bool dequeueMessage(char *out)                          // ESP32: copies, so the slot can be reused at once
+static DIGI_HOT bool dequeueMessage(char *out)                 // ESP32: copies, so the slot can be reused at once
 {
     apply_queue_clear();
     if (s_q_head == s_q_tail) return false;
     fence_acquire();
-    memcpy(out, s_rtty_q[s_q_tail], MAX_MESSAGE_LENGTH);
+    for (int i = 0; i < MAX_MESSAGE_LENGTH; i++) out[i] = s_rtty_q[s_q_tail][i];   // no library call in the tick
     s_q_tail = (s_q_tail + 1) % MAX_QUEUE_MESSAGES;
     return true;
 }
 
 // Nano transmitRttyString() as a code-at-a-time state machine. Returns the next Baudot code, or -1 at the end.
 enum { RT_PRE = 0, RT_TEXT, RT_TRAIL, RT_END };
-static int rtty_next_code(void)
+static DIGI_HOT int rtty_next_code(void)
 {
-    static const int pre[6] = { 27, 31, 27, 31, 8, 2 };        // FIGS LTRS FIGS LTRS CR LF
+    static const int DIGI_DATA pre[6] = { 27, 31, 27, 31, 8, 2 };   // FIGS LTRS FIGS LTRS CR LF
     for (;;) {
         switch (s_rt_phase) {
         case RT_PRE:
@@ -343,7 +366,7 @@ static int rtty_next_code(void)
         case RT_TEXT: {
             char c = s_rt_text[s_rt_pos];
             if (c && s_digi_tx_on) {                           // Nano: while (*text && DigiTxOn)
-                BaudotEntry e = getBaudotCode(c);
+                BaudotEntry e = s_baudot[(uint8_t)c];
                 if (e.requires_figures_shift && s_rt_ltrs) { s_rt_ltrs = false; return FIGURES_SHIFT_CODE; }
                 if (!e.requires_figures_shift && !s_rt_ltrs) { s_rt_ltrs = true; return LETTERS_SHIFT_CODE; }
                 s_rt_pos++;
@@ -366,19 +389,20 @@ static int rtty_next_code(void)
 }
 
 // bit b of the current code: 0 = start (space), 1..5 = data LSB first, 6 = stop (mark, two bit times)
-static int  rtty_bit_value(int b)  { return b == 0 ? 0 : (b == 6 ? 1 : (s_rt_code >> (b - 1)) & 1); }
-static float rtty_hz(int v)        { return (float)(v ? MARK_FREQ : SPACE_FREQ); }
+static DIGI_HOT int  rtty_bit_value(int b)  { return b == 0 ? 0 : (b == 6 ? 1 : (s_rt_code >> (b - 1)) & 1); }
+static DIGI_HOT float rtty_hz(int v)        { return (float)(v ? MARK_FREQ : SPACE_FREQ); }
 
 // erf step at a boundary x_us away (x < 0: before it). W == 0: hard step, exactly the Nano's keying.
-static float rtty_phi(double x_us)
+static DIGI_HOT float rtty_phi(int32_t x_us)
 {
     const digi_tab_t *t = s_rt;
-    if (t->W == 0) return x_us >= 0.0 ? 1.0f : 0.0f;
-    double xt = x_us * (double)s_cfg.tick_hz * 1e-6;
-    if (xt <= -t->W) return t->phi[0];
-    if (xt >= t->W) return 1.0f;
-    int i = (int)floor(xt);
-    float fr = (float)(xt - i);
+    if (t->W == 0) return x_us >= 0 ? 1.0f : 0.0f;
+    float xt = (float)x_us * s_ticks_per_us;
+    if (xt <= (float)-t->W) return t->phi[0];
+    if (xt >= (float)t->W) return 1.0f;
+    int i = (int)xt;
+    if ((float)i > xt) i--;                                    // floor without libm
+    float fr = xt - (float)i;
     float a = t->phi[i + t->W];
     float b = (i + 1 >= t->W) ? 1.0f : t->phi[i + 1 + t->W];
     return a + (b - a) * fr;
@@ -386,12 +410,12 @@ static float rtty_phi(double x_us)
 
 // Tone after the current bit: the next data/stop bit, or the next character's start bit (space), or - when the
 // message ends - mark held (no change).
-static float rtty_next_hz(void)
+static DIGI_HOT float rtty_next_hz(void)
 {
     if (s_rt_bit < 6) return rtty_hz(rtty_bit_value(s_rt_bit + 1));
     return s_rt_pending >= 0 ? rtty_hz(0) : s_cur;
 }
-static long rtty_bit_len_us(int b) { return b == 6 ? STOP_BIT_DURATION_US : BIT_DURATION_US; }
+static DIGI_HOT long rtty_bit_len_us(int b) { return b == 6 ? STOP_BIT_DURATION_US : BIT_DURATION_US; }
 
 // ======================================================================================================== JTTY
 static void jttyPutSymbol(uint16_t d, uint8_t s)
@@ -407,15 +431,15 @@ static uint8_t jttyHexVal(char c)
     if (c >= 'a' && c <= 'f') return (uint8_t)(c - 'a' + 10);
     return 0xFF;
 }
-static uint32_t jttyTotalSymbols(void) { return (uint32_t)(s_jtty_count / JTTY_DATA_LEN) * JTTY_FRAME_LEN; }
-static uint8_t jttyTone(uint32_t i)
+static DIGI_HOT uint32_t jttyTotalSymbols(void) { return (uint32_t)(s_jtty_count / JTTY_DATA_LEN) * JTTY_FRAME_LEN; }
+static DIGI_HOT uint8_t jttyTone(uint32_t i)
 {
     uint32_t f = i % JTTY_FRAME_LEN;
     if (f < JTTY_SYNC_LEN) return jttySync[f];
     uint32_t d = (i / JTTY_FRAME_LEN) * JTTY_DATA_LEN + (f - JTTY_SYNC_LEN);
     return (uint8_t)((s_jtty_buf[d >> 2] >> ((d & 3) * 2)) & 3);
 }
-static void jttyReset(void)
+static DIGI_HOT void jttyReset(void)
 {
     s_jtty_count = 0;
     s_jtty_tune = false;
@@ -448,6 +472,11 @@ void digi_init(const digi_cfg_t *cfg)
 {
     if (cfg) s_cfg = *cfg;
     if (s_cfg.tick_hz == 0) s_cfg.tick_hz = 20000;
+    s_ticks_per_ms = s_cfg.tick_hz / 1000u;                    // exact at 20 kHz (all symbol/bit times are whole ms or us)
+    if (s_ticks_per_ms == 0) s_ticks_per_ms = 1;
+    s_tick_us = 1000000u / s_cfg.tick_hz;
+    s_ticks_per_us = (float)s_cfg.tick_hz * 1e-6f;
+    build_baudot_table();
     s_mode = DIGI_MODE_FT8;                                    // Nano DEFAULT_MODE; the {M} handler sets the real one
     publish_table(s_mode);
     set_digital_tx_buffer();
@@ -538,7 +567,7 @@ void digi_abort(void)
 
 // ================================================================================================ FT sequencing
 // Nano AdjustStart(): first symbol to send for the time left in the period (WSJT-X late-start rule)
-static int AdjustStart(long time_left_ms, int mode, int symbol_count, int tone_duration)
+static DIGI_HOT int AdjustStart(long time_left_ms, int mode, int symbol_count, int tone_duration)
 {
     int iRet = 0;
     long TimeLeft = time_left_ms;
@@ -556,8 +585,8 @@ static int AdjustStart(long time_left_ms, int mode, int symbol_count, int tone_d
     return iRet;
 }
 
-static const ftbuf_t *ft_buf(void) { int p = s_ftbuf_pub; fence_acquire(); return &s_ftbuf[p]; }
-static float ft_tone(int i)
+static DIGI_HOT const ftbuf_t *ft_buf(void) { int p = s_ftbuf_pub; fence_acquire(); return &s_ftbuf[p]; }
+static DIGI_HOT float ft_tone(int i)
 {
     const ftbuf_t *b = ft_buf();
     int k = (i >= 0 && i < 106) ? i : 0;
@@ -565,7 +594,7 @@ static float ft_tone(int i)
 }
 
 // ============================================================================================================ tick
-static void end_run(void)
+static DIGI_HOT void end_run(void)
 {
     if (s_rt && s_rt->mode == DIGI_MODE_JTTY) jttyReset();     // Nano transmitJtty(): jttyReset() at the end
     s_digi_tx_on = false;                                      // Nano: key up (main loop does the TX hold)
@@ -573,7 +602,7 @@ static void end_run(void)
     s_ends = s_ends + 1;
 }
 
-static void start_run(void)
+static DIGI_HOT void start_run(void)
 {
     int p = s_tab_pub; fence_acquire();
     s_rt = &s_tab[p];
@@ -594,7 +623,7 @@ static void start_run(void)
         s_rt_bit = 0;
         s_rt_t_us = 0;
         s_rt_bit_start_us = 0;
-        s_rt_bit_end_us = (double)rtty_bit_len_us(0);
+        s_rt_bit_end_us = (uint32_t)rtty_bit_len_us(0);
         s_symbols_sent = 1;
         s_first_symbol = 0;
         s_freq = s_cur = s_prev = rtty_hz(rtty_bit_value(0));
@@ -634,7 +663,7 @@ static void start_run(void)
 enum { TK_DONE = 0, TK_LAST, TK_MORE };
 
 // One FT tick.
-static int ft_tick(void)
+static DIGI_HOT int ft_tick(void)
 {
     const digi_tab_t *t = s_rt;
     const int count = t->symbol_count;
@@ -689,7 +718,7 @@ static int ft_tick(void)
     return TK_MORE;
 }
 
-static int jtty_tick(void)
+static DIGI_HOT int jtty_tick(void)
 {
     const digi_tab_t *t = s_rt;
     if (!s_digi_tx_on) return TK_DONE;                           // Nano: {X0} / lockout -> goto done
@@ -713,9 +742,9 @@ static int jtty_tick(void)
     return TK_MORE;
 }
 
-static int rtty_tick(void)
+static DIGI_HOT int rtty_tick(void)
 {
-    s_rt_t_us += 1e6 / (double)s_cfg.tick_hz;
+    s_rt_t_us += s_tick_us;
     s_run_tick++;
     while (s_rt_t_us >= s_rt_bit_end_us) {
         if (++s_rt_bit > 6) {
@@ -731,13 +760,13 @@ static int rtty_tick(void)
         s_prev = s_cur;
         s_cur = rtty_hz(rtty_bit_value(s_rt_bit));
         s_rt_bit_start_us = s_rt_bit_end_us;
-        s_rt_bit_end_us += (double)rtty_bit_len_us(s_rt_bit);
+        s_rt_bit_end_us += (uint32_t)rtty_bit_len_us(s_rt_bit);
         s_next = rtty_next_hz();
     }
     // mark +85 / space -85 Hz; with DIGI_BT_RTTY 0 the steps are hard (Nano), otherwise Gaussian, centred on the bit
     // boundaries as in the FT modes
-    s_freq = s_cur + (s_cur - s_prev) * (rtty_phi(s_rt_t_us - s_rt_bit_start_us) - 1.0f)
-                   + (s_next - s_cur) * rtty_phi(s_rt_t_us - s_rt_bit_end_us);
+    s_freq = s_cur + (s_cur - s_prev) * (rtty_phi((int32_t)(s_rt_t_us - s_rt_bit_start_us)) - 1.0f)
+                   + (s_next - s_cur) * rtty_phi((int32_t)(s_rt_t_us - s_rt_bit_end_us));
     return TK_MORE;
 }
 
@@ -775,7 +804,7 @@ void DIGI_HOT digi_tick(bool requested, bool tx_ready, uint32_t keydown_count, d
                 if (s_mode == DIGI_MODE_JTTY) d = 0;           // Nano: no T/R period, start now
                 if (d < 0) d = 0;
             }
-            s_delay_left = (uint32_t)ticks_of_ms(d);
+            s_delay_left = ticks_of_ms_fast(d);
             s_state = ST_DELAY;
         }
         break;
