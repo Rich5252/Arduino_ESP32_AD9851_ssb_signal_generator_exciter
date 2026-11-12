@@ -1817,6 +1817,26 @@ static uint32_t s_last_rate_print_ms = 0;
 uint32_t diagnostics_get_late_tick_count(void) { return s_dbg_late_tick_count; }
 uint32_t diagnostics_get_stale_commit_count(void) { return s_dbg_isr_stale_commit_count; }
 
+// ---- 2026-11-12 stage latency, see diagnostics.h. Single writer (dsp_task); the reader only resets the max. ----
+static volatile uint32_t s_stage_lat_bins[STAGE_LAT_BINS];
+static volatile uint32_t s_stage_lat_max = 0;
+void IRAM_ATTR diagnostics_record_stage_latency(uint32_t us)
+{
+    if (us > s_stage_lat_max) s_stage_lat_max = us;
+    int b = us < 35 ? 0 : us < 40 ? 1 : us < 45 ? 2 : us < 50 ? 3 : us < 60 ? 4 : 5;
+    s_stage_lat_bins[b] = s_stage_lat_bins[b] + 1;
+}
+void diagnostics_get_stage_latency_bins(uint32_t bins[STAGE_LAT_BINS])
+{
+    for (int i = 0; i < STAGE_LAT_BINS; i++) bins[i] = s_stage_lat_bins[i];
+}
+uint32_t diagnostics_stage_latency_take_max(void)
+{
+    uint32_t m = s_stage_lat_max;
+    s_stage_lat_max = 0;
+    return m;
+}
+
 void diagnostics_reset(void)
 {
     // 2026-09-30: also clear the ISR-interp staging-error statistics (see

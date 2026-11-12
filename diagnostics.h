@@ -210,6 +210,13 @@ void IRAM_ATTR diagnostics_record_jump_busy_us(uint32_t busy_us);
 // (ssb_mic_test.ino), even though this one's own body is just a volatile
 // store with no real-time sensitivity of its own.
 void IRAM_ATTR diagnostics_record_isr_stale_commits(uint32_t stale_commit_count);
+// 2026-11-12 stage latency (STAGE_LATENCY_DIAG_ENABLED): dsp_task records, once per full tick, the microseconds from
+// the alarm to the moment its value is staged for the ISR's next AD9851 write. Bins: <35, 35-40, 40-45, 45-50,
+// 50-60, >=60 us (cumulative); max since the last diagnostics_stage_latency_take_max().
+#define STAGE_LAT_BINS 6
+void IRAM_ATTR diagnostics_record_stage_latency(uint32_t us);
+void diagnostics_get_stage_latency_bins(uint32_t bins[STAGE_LAT_BINS]);
+uint32_t diagnostics_stage_latency_take_max(void);   // returns the max and restarts it
 
 // 'J' serial command - dumps the aggregate near-null/total jump counts
 // plus each of the last JUMP_LOG_LEN qualifying events (oldest to newest)

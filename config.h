@@ -150,6 +150,10 @@
 // bit-bang on Core 1, dsp_task on Core 0), which could stretch the ISR's own
 // ~13.6us (watch pin 5 low width / ad9851 max_spi_us) - unmeasured.
 #define ISR_NOTIFY_BEFORE_AD9851_ENABLED   1
+// 2026-11-12: stage-latency diagnostic. The alarm ISR timestamps each full tick (one esp_timer_get_time(), ~0.2 us,
+// before it wakes dsp_task); dsp_task measures alarm -> "value staged for the next AD9851 write". Over 50 us is a
+// stale commit. Shown by {K} as a max and a histogram since the previous {K}. 0 removes both halves.
+#define STAGE_LATENCY_DIAG_ENABLED   1
 
 #if AD9851_ISR_WRITE_ENABLED && !AD9851_ATTACHED
 #error "AD9851_ISR_WRITE_ENABLED requires AD9851_ATTACHED - there's no AD9851 to write to otherwise."

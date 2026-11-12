@@ -4748,6 +4748,41 @@ The fix proposed above, made at the user's request:
 - Host check: all 60 checks pass. The FT8/FT4/Nano-shape/restart/hard-RTTY traces are bit-identical to the previous build; shaped RTTY differs by at most 1.5e-5 Hz (float rounding).
 - To re-measure: max_busy and overruns after a counter reset, in a TX of each mode (RTTY with DIGI_BT_RTTY > 0 is the heaviest).
 
+### 2026-11-12 - Bench: digital modes after the IRAM fix - max_busy 40 us, 0 overruns
+
+The user ran all the digital modes plus CW with the IRAM build. `V`: max_busy_us 40 (adc 16 / dsp 23 / write 13), overruns 0, wakeup max_gap 64 us, late_ticks_total 0. Before the fix it was 61 us with 3 overruns; CW had been 44 us. So the flash-cache explanation fits; the fix is confirmed on the bench.
+- Also in that `V`: stale_commits=201455 "since boot". That is about 10 s worth of 20 kHz ticks. With late ticks at 0 and no overruns it looks like a one-off burst (boot or a pause), not a steady rate. This line is often dropped by the print guard, so earlier values are unknown. To check: `{K}` twice during a digital TX - its "dsp since last K" line gives late/stale per second (0/s on 2026-11-04). Not yet checked.
+
+### 2026-11-12 - Stale AD9851 commits are steady at ~220/s in FT8 TX (not a boot burst)
+
+`{K}` pair from the user, FT8 TX, L0: "dsp since last K (4.0 s): late ticks +0, stale commits +878 (221.50/s)". The total went from 201455 at the earlier `V` to 256596, also roughly 220/s, so this is a steady rate, about 1.1 % of ticks. It is not the one-off burst suggested in the entry above. The 2026-11-04 bench (split ADC read) measured 0/s.
+- Why no late ticks: a late tick counts only when the wake gap is above 75 us (1.5 x 50), but a stale commit happens whenever dsp_task stages its value more than 50 us after the alarm, i.e. wake delay plus busy time over 50 us (max_busy 40 + max_gap 64 is enough).
+- Effect: one frequency update goes out one tick (50 us) late. In the digital modes the tone moves at most about 0.07 Hz per tick (FT8), so this is negligible. In voice it is a one-tick freq/envelope misalignment now and then - that is why 0/s was the target.
+- Same `{K}`: slow ADC "split step us max 695 mean 230" with the task on core 0, the same core as dsp_task.
+- Not known yet which change since 11-04 raised it. Suggested A/B with `{K}` pairs: USB RX idle; CW TX; FT8 TX; FT8 TX with `{K2}` (slow ADC reads paused). No firmware change made.
+
+- 2026-11-12 follow-up: USB, receiving, not transmitting: stale commits 247/s (3.1 s) and 310/s (210 s), late ticks 0. So the rate does not depend on TX or the digital modes. Next: `{K2}` (slow ADC reads paused), then a `{K}` pair.
+
+- 2026-11-12 follow-up: CW TX: stale commits 146/s (3.2 s) and 168/s (110 s), late ticks 0. So far: CW TX about 150-170/s, FT8 TX about 220/s, USB RX about 250-310/s - present in every mode. The `{K2}` test is still to do.
+
+- 2026-11-12 follow-up: FT8 TX again: 149/s (3.1 s); over the preceding 66.5 s only 37/s. So the rate swings a lot (37-310/s) and does not follow the mode or TX state in any clear way.
+
+- 2026-11-12 follow-up: FT8 TX with the slow ADC reads paused (`{K2}`): stale commits 288/s (15.1 s) and 182/s (2.3 s). So the slow ADC task is NOT the cause. The rate is about the same in every mode, TX or RX, and swings between 37 and 310/s.
+  - Reading (hedged): a margin problem rather than one culprit. A stale commit needs wake delay plus the time to the staging point to exceed 50 us; max_busy is 40 us and max_gap 64 us, so the tail of the distribution crosses 50 us about 1 % of the time. Work added to the tick since 2026-11-04 (tx_control_tick, tx_level_apply, edges, the CW delay line, digi) would push that tail out.
+  - Also seen: diagnostics_set_tx_info() (jump log / null-bias bookkeeping) runs BEFORE the value is staged for the ISR. Moving the staging ahead of it would shorten the critical path; not tried.
+  - Options, none done: (a) flash the 3f83030 build (2026-11-06, before the TX sequencer) and `{K}` it, to see whether the rate grew with the TX work; (b) instrument the time from alarm to staging (max and a histogram); (c) stage before the diagnostics.
+
+### 2026-11-12 - Stale commits: staging moved earlier + stage-latency diagnostic (uncompiled)
+
+Options 2 and 3 above, at the user's request ("assuming 2 doesn't risk causing another delay"):
+- (3) In dsp_task, the staging block (s_pending_* values, s_stage_seq++) now comes BEFORE diagnostics_set_tx_info() instead of after it. Same values, same order of everything else; the ISR's next AD9851 write just gets its value a few us sooner. The jump-log entry is still finalised later in the tick, as before.
+- (2) `STAGE_LATENCY_DIAG_ENABLED 1` (config.h):
+  - The alarm ISR stores the low 32 bits of esp_timer_get_time() on each full tick, just before it wakes dsp_task. That is the only ISR addition, about 0.2 us, so the wake is that much later.
+  - dsp_task takes that value at the top of its tick and records alarm -> staged in us (one more esp_timer_get_time()) into a histogram: <35 / 35-40 / 40-45 / 45-50 / 50-60 / >=60 us.
+  - `{K}` prints that histogram and the max since the previous `{K}`. Ticks at 50 us or more should match the stale-commit count.
+  - Set the flag to 0 to remove all of it.
+- To check: `{K}` pairs in USB RX / CW / FT8 as before; compare the stale rate with 150-310/s, and see how much margin the histogram shows.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

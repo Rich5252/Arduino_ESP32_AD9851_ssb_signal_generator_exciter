@@ -209,6 +209,11 @@ static volatile bool s_pending_valid = false;          // guards the very first 
 static volatile uint32_t s_stage_seq = 0;
 static uint32_t s_isr_last_seen_seq = 0;
 static volatile uint32_t s_stale_commit_count = 0;
+#if STAGE_LATENCY_DIAG_ENABLED
+// 2026-11-12: low 32 bits of esp_timer_get_time() at each full-tick alarm (written by the ISR just before it wakes
+// dsp_task, read by dsp_task at the top of that tick) - see config.h STAGE_LATENCY_DIAG_ENABLED.
+static volatile uint32_t s_isr_alarm_us = 0;
+#endif
 #endif
 #endif
 
@@ -472,6 +477,9 @@ static bool IRAM_ATTR on_timer_alarm(gptimer_handle_t timer, const gptimer_alarm
     // ("ENVELOPE_INTERP_USE_HW_FADE || (AD9851_ATTACHED &&
     // AD9851_ISR_WRITE_ENABLED)") for the task-side half of this.
     if (is_full_tick) {
+#if STAGE_LATENCY_DIAG_ENABLED
+        s_isr_alarm_us = (uint32_t)esp_timer_get_time();   // before the wake, so dsp_task always sees this tick's
+#endif
         vTaskNotifyGiveFromISR(s_dsp_task, &high_task_woken);
     }
 #elif ENVELOPE_INTERP_USE_HW_FADE
@@ -838,6 +846,9 @@ static void IRAM_ATTR dsp_task(void* arg)
         digitalWrite(TIMING_DEBUG_GPIO, HIGH);
 #endif
         int64_t t_start_us = esp_timer_get_time();
+#if AD9851_ATTACHED && AD9851_ISR_WRITE_ENABLED && STAGE_LATENCY_DIAG_ENABLED
+        const uint32_t tick_alarm_us = s_isr_alarm_us;   // this tick's alarm (taken now, before the next one fires)
+#endif
 #if DIAG_HOTPATH_RECORDING_ENABLED
         diagnostics_record_tick_start(t_start_us);
 #endif
@@ -1115,13 +1126,10 @@ static void IRAM_ATTR dsp_task(void* arg)
         // envelope from one consistent tuple to the next, never at
         // absolute wall-clock truth, so a constant shared shift across
         // every sample here doesn't change anything it computes.
-        diagnostics_set_tx_info(delayed_freq_dev_hz, delayed_envelope, envelope_at_freq_time,
-                                 envelope_at_freq_time_min, raw_freq_dev_near, raw_freq_dev_far,
-                                 raw_freq_dev_current, raw_envelope_current,
-                                 tx_freq);
-#endif
-
 #if AD9851_ATTACHED && TX_WRITE_RESYNC_ENABLED
+        // 2026-11-12: MOVED here, ahead of diagnostics_set_tx_info() (it used to follow it). The staging is what the
+        // ISR's next AD9851 write waits for, and the diagnostics bookkeeping does not need to come first: same
+        // values, staged a few us earlier, to cut stale commits (~150-300/s on the bench, 2026-11-12).
         // Buffer this tick's result for the resync write at the top of the
         // NEXT tick - see config.h's TX_WRITE_RESYNC_ENABLED comment and
         // the resync block near the top of this loop. Always staged
@@ -1141,8 +1149,17 @@ static void IRAM_ATTR dsp_task(void* arg)
         s_pending_valid = true;
 #if AD9851_ISR_WRITE_ENABLED
         s_stage_seq++;   // see s_stage_seq's own declaration comment
+#if STAGE_LATENCY_DIAG_ENABLED
+        diagnostics_record_stage_latency((uint32_t)esp_timer_get_time() - tick_alarm_us);   // alarm -> staged, us
+#endif
         diagnostics_record_isr_stale_commits(s_stale_commit_count);
 #endif
+#endif
+
+        diagnostics_set_tx_info(delayed_freq_dev_hz, delayed_envelope, envelope_at_freq_time,
+                                 envelope_at_freq_time_min, raw_freq_dev_near, raw_freq_dev_far,
+                                 raw_freq_dev_current, raw_envelope_current,
+                                 tx_freq);
 #endif
 
         // Non-blocking, always succeeds - overwrites whatever was there.

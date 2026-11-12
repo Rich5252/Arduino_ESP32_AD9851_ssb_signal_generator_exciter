@@ -325,6 +325,20 @@ static void brace_run_command(const brace_cmd_t *cmd)
                               tx_mode_name(tx_mode_get()), tx_seq_state_name(), tx_out_get() ? "ON" : "off",
                               tx_level_get(), tx_extpa_get_on() ? "ON" : "off", tx_extpa_get_level(),
                               tx_extpa_out_get() ? "ON" : "off", fan_get_duty(), fan_get_low_pwm(), fan_get_hold_min());
+#if AD9851_ATTACHED && AD9851_ISR_WRITE_ENABLED && STAGE_LATENCY_DIAG_ENABLED
+                {
+                    // 2026-11-12: alarm -> value staged for the AD9851 (over 50 us = a stale commit), since the last {K}
+                    static uint32_t prev[STAGE_LAT_BINS];
+                    uint32_t cur[STAGE_LAT_BINS], d[STAGE_LAT_BINS];
+                    diagnostics_get_stage_latency_bins(cur);
+                    for (int i = 0; i < STAGE_LAT_BINS; i++) { d[i] = cur[i] - prev[i]; prev[i] = cur[i]; }
+                    uint32_t tot = 0; for (int i = 0; i < STAGE_LAT_BINS; i++) tot += d[i];
+                    serial_reply("->   staged after alarm: max %lu us; ticks <35 %lu, 35-40 %lu, 40-45 %lu, 45-50 %lu, "
+                                  "50-60 %lu, >=60 %lu (of %lu)\r\n", (unsigned long)diagnostics_stage_latency_take_max(),
+                                  (unsigned long)d[0], (unsigned long)d[1], (unsigned long)d[2], (unsigned long)d[3],
+                                  (unsigned long)d[4], (unsigned long)d[5], (unsigned long)tot);
+                }
+#endif
             } else if ((cmd->arg[0] == '0' || cmd->arg[0] == '1') && cmd->arg[1] == 0) {
                 slow_adc_set_report_enabled(cmd->arg[0] == '1');
                 serial_reply("-> slow ADC report (fields F R S T) %s\r\n", slow_adc_report_enabled() ? "ON" : "OFF");
