@@ -155,12 +155,24 @@ static uint32_t carrier_hz(void);   // defined further down
 // 2026-11-11 safety trips on every published average (rules in slow_adc_conv.h): SWR (needs real FWD and REV
 // inputs) and PA temperature (needs a real TEMP input; limit from {T}). Only while TX is requested - once per over,
 // re-armed by the next {U}; a condition that persists trips again within ~250 ms of that {U}.
+#ifndef TEMP_TRIP_FAULT_WINDOWS
+#define TEMP_TRIP_FAULT_WINDOWS 1
+#endif
+static uint32_t s_temp_fault_streak = 0;   // consecutive averages with the NTC reading open/shorted (-99)
+
 static void check_trips(void)
 {
-    if (!tx_request_get()) return;
     slow_adc_reading_t r;
     slow_adc_convert(s_avg_mv[SLOW_ADC_FWD] / 1000.0f, s_avg_mv[SLOW_ADC_REV] / 1000.0f,
                      s_avg_mv[SLOW_ADC_TEMP] / 1000.0f, carrier_hz(), &s_conv, &r);
+#if TEMP_TRIP_ENABLED
+    // 2026-11-12: the sensor-fault streak is counted on every average, TX on or off; it only acts while TX is on
+    temp_trip_t tt = TEMP_TRIP_NONE;
+    if (s_ch[SLOW_ADC_TEMP].kind == CH_ADC2)
+        tt = slow_adc_temp_trip_check_streak(r.temp_c, (float)tx_temp_max_get(), TEMP_TRIP_ON_SENSOR_FAULT != 0,
+                                             &s_temp_fault_streak, TEMP_TRIP_FAULT_WINDOWS);
+#endif
+    if (!tx_request_get()) return;
 #if SWR_TRIP_ENABLED
     if (s_ch[SLOW_ADC_FWD].kind == CH_ADC2 && s_ch[SLOW_ADC_REV].kind == CH_ADC2) {
         swr_trip_t t = slow_adc_swr_trip_check(r.fwd_w, r.rev_w, r.swr, s_avg_mv[SLOW_ADC_REV],
@@ -172,11 +184,8 @@ static void check_trips(void)
     }
 #endif
 #if TEMP_TRIP_ENABLED
-    if (s_ch[SLOW_ADC_TEMP].kind == CH_ADC2) {
-        temp_trip_t t = slow_adc_temp_trip_check(r.temp_c, (float)tx_temp_max_get(), TEMP_TRIP_ON_SENSOR_FAULT != 0);
-        if (t != TEMP_TRIP_NONE)
-            tx_trip(slow_adc_temp_trip_name(t), r.swr, r.fwd_w, r.rev_w, s_avg_mv[SLOW_ADC_REV], r.temp_c);
-    }
+    if (tt != TEMP_TRIP_NONE)
+        tx_trip(slow_adc_temp_trip_name(tt), r.swr, r.fwd_w, r.rev_w, s_avg_mv[SLOW_ADC_REV], r.temp_c);
 #endif
 }
 

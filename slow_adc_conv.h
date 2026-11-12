@@ -70,6 +70,11 @@ const char *slow_adc_swr_trip_name(swr_trip_t t);
 // (a shorted NTC really means "very hot", an open one hides any overheating).
 typedef enum { TEMP_TRIP_NONE = 0, TEMP_TRIP_OVER, TEMP_TRIP_SENSOR_FAULT } temp_trip_t;
 temp_trip_t slow_adc_temp_trip_check(float temp_c, float max_c, bool fault_trips);
+// 2026-11-12: as above, but a sensor fault must be seen in fault_windows consecutive calls (one per published average)
+// before it trips. *fault_streak is the caller's counter: incremented on a fault reading, cleared on a good one. Call
+// it on every average (TX on or off) so a fault already present when TX starts still needs no extra wait.
+temp_trip_t slow_adc_temp_trip_check_streak(float temp_c, float max_c, bool fault_trips, uint32_t *fault_streak,
+                                            uint32_t fault_windows);
 const char *slow_adc_temp_trip_name(temp_trip_t t);
 
 // All four values from the three averaged pin voltages.

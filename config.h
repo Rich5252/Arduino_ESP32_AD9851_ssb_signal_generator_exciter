@@ -819,6 +819,10 @@
 #define TEMP_TRIP_ENABLED         1
 #define TEMP_TRIP_DEFAULT_C       54       // Nano TxMaxTemp
 #define TEMP_TRIP_ON_SENSOR_FAULT 1        // open/shorted NTC (reads -99) also trips; 0 = ignore sensor faults
+// 2026-11-12: a sensor fault trips only after this many CONSECUTIVE fault averages (~250 ms each). One all-zero average
+// (every channel 0 mV, cause unknown) was seen on the bench in RX; with 1 it would have aborted a TX. Over-temperature
+// still trips on the first average.
+#define TEMP_TRIP_FAULT_WINDOWS   3
 // PA fan (2026-11-11, fan_control.h): Nano CheckFanState() port. Full while TX, then {R} low speed for {B} minutes,
 // full while the PA is above FAN_HIGH_TEMP_C. PWM frequency: 25 kHz is the PC 4-wire-fan standard and keeps the
 // fan's supply-current ripple (and any coupling into the PA/exciter) well outside the SSB passband; the Nano ran

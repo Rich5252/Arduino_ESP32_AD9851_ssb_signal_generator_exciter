@@ -84,6 +84,18 @@ temp_trip_t slow_adc_temp_trip_check(float temp_c, float max_c, bool fault_trips
     return TEMP_TRIP_NONE;
 }
 
+temp_trip_t slow_adc_temp_trip_check_streak(float temp_c, float max_c, bool fault_trips, uint32_t *fault_streak,
+                                            uint32_t fault_windows)
+{
+    if (temp_c <= -98.0f) {
+        if (*fault_streak < 0xFFFFFFFFu) *fault_streak = *fault_streak + 1;
+        if (!fault_trips) return TEMP_TRIP_NONE;
+        return (*fault_streak >= (fault_windows ? fault_windows : 1)) ? TEMP_TRIP_SENSOR_FAULT : TEMP_TRIP_NONE;
+    }
+    *fault_streak = 0;
+    return (temp_c >= max_c) ? TEMP_TRIP_OVER : TEMP_TRIP_NONE;
+}
+
 const char *slow_adc_temp_trip_name(temp_trip_t t)
 {
     switch (t) {

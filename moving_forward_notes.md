@@ -4783,6 +4783,28 @@ Options 2 and 3 above, at the user's request ("assuming 2 doesn't risk causing a
   - Set the flag to 0 to remove all of it.
 - To check: `{K}` pairs in USB RX / CW / FT8 as before; compare the stale rate with 150-310/s, and see how much margin the histogram shows.
 
+### 2026-11-12 - Bench: staging moved earlier -> stale commits down from 150-310/s to ~0.3-4/s
+
+After boot, then FT8 TX:
+- Stale commits: 0.28/s over 66.7 s and 4.35/s over 3.9 s, against 150-310/s before the change. Late ticks 0.
+- Stage-latency histogram (66.7 s, 1.33 M ticks), alarm -> staged: <35 us 31 %, 35-40 47 %, 40-45 21 %, 45-50 1.1 %, 50-60 62 ticks, >=60 0; max 51 us.
+- Since boot (USB RX): max 81 us, 4 ticks >=60 and 2 in 50-60 - probably start-up.
+- Reading: moving the staging ahead of diagnostics_set_tx_info() fixed it, but the margin is thin. Typical staging is 35-45 us into the 50 us tick, so any new work before the staging point will bring stale commits back. The 50-60 bin can exceed the stale count because the ISR's staleness check runs a little after the alarm timestamp.
+
+### 2026-11-12 - One all-zero slow-ADC window seen: {F0.0}{R0.00}{S0.0}{T-99.00} (cause unknown, not fixed)
+
+In the same log, in RX shortly after a `{F14080000}` and about 1 s before an FT8 key-down, one 250 ms report line had every channel at 0 mV. FWD, REV and TEMP had been 26 mV, ~0 and 1.65 V either side. `{K}` showed err 0 for every channel.
+- Nothing in slow_adc.cpp writes zeros except init, so every read in that window must have come back as a successful conversion with raw ~0. Unexplained.
+- A mode change loads a preset; that does not restart ADC1 (checked: resample prime / LPF mode only), so that is not the explanation.
+- RISK: check_trips() runs on the same average. While TX is requested, T -99 is a sensor-fault temperature trip (TEMP_TRIP_ON_SENSOR_FAULT 1) - a spurious TX abort. trips 0 here, so TX was not requested at that moment.
+- Possible guards (not done): ignore a window in which every ADC2 channel reads ~0, and/or require the sensor fault in two consecutive windows before tripping.
+
+- 2026-11-12 follow-up: USB TX (L0), 11.6 s: stale 0, staged after alarm max 49 us; <35 33 %, 35-40 46 %, 40-45 20 %, 45-50 1.1 %, >=50 none. FT8 earlier: 0.3-4/s with a 50-60 tail.
+  - USB is not the worst case: the mic DSP runs in every mode (CW and digital override its output after it runs). CW and digital add their own tick work on top, so they sit a little closer to 50 us.
+  - Where the stale commits came from since 2026-11-04 (0/s then, split ADC read, two-tone test): not proven. Most likely the TX sequencer / level / RF-edge / CW key-delay work added to the tick on 2026-11-10 (d619b9c, 8208719), plus digi on 11-11. That work runs before the staging point and would push the ~1 % tail past 50 us while diagnostics_set_tx_info() still came first. A strict test would be `{K}` pairs on 3f83030 (2026-11-06, before the TX sequencer) and on d619b9c; it is not needed now that the staging fix works.
+
+- 2026-11-12, user decision: sensor-fault trip only on repeated bad reads. `TEMP_TRIP_FAULT_WINDOWS 3` (config.h): a -99 (open/shorted) temperature must appear in 3 consecutive averages (~0.75 s) before it trips. The streak is counted on every average, TX on or off, and a good reading clears it. Over-temperature still trips on the first average. Pure helper `slow_adc_temp_trip_check_streak()` in slow_adc_conv; host test 990 checks pass. The all-zero average itself is still unexplained; the SWR rules are unchanged (an all-zero average reads as no forward power, so it cannot trip SWR). Uncompiled for the ESP32.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened
