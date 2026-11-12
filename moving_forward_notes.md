@@ -4738,6 +4738,16 @@ The user's `V` after digital runs showed: max_busy_us 61 (adc 37 / dsp 17 / writ
 - Proposed fix, not yet made: DIGI_HOT = IRAM_ATTR on ESP32 for digi_tick and its tick-path functions; tick-path constant data in DRAM; RTTY time in integer microseconds with float edges; 32-bit tick->ms. Then re-measure after a counter reset in each mode.
 - Effect so far: one tick up to ~15 us late now and then. That is far below anything the symbol-timing jitter simulation showed (1 ms random made no difference).
 
+### 2026-11-12 - digi_gen tick path moved to IRAM (uncompiled for the ESP32; host output unchanged)
+
+The fix proposed above, made at the user's request:
+- DIGI_HOT = IRAM_ATTR on ESP32 (esp_attr.h; empty on a host build) for digi_tick, digi_mode_is_digital (called every tick by tx_control_tick) and every function they call: the FT/JTTY/RTTY tick functions, start/end, AdjustStart, the table and tone helpers, the RTTY encoder, queue dequeue and clear, and the JTTY tone and reset.
+- DIGI_DATA = DRAM_ATTR for constant tables the tick reads: jttySync and the RTTY preamble.
+- The RTTY character lookup now uses a 256-entry table in DRAM, filled from the unchanged getBaudotCode() at init, because a switch compiles to a jump table in flash. dequeueMessage copies with a plain loop instead of memcpy.
+- RTTY timing is now in integer microseconds, with float edge maths and a floor done without libm. ms_of_ticks is a 32-bit divide by ticks-per-ms (exact at 20 kHz); the start delay uses a 32-bit multiply.
+- Host check: all 60 checks pass. The FT8/FT4/Nano-shape/restart/hard-RTTY traces are bit-identical to the previous build; shaped RTTY differs by at most 1.5e-5 Hz (float rounding).
+- To re-measure: max_busy and overruns after a counter reset, in a TX of each mode (RTTY with DIGI_BT_RTTY > 0 is the heaviest).
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened
