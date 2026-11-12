@@ -4863,6 +4863,13 @@ User: disable the older diagnostics, keep only what the timing investigation nee
 - Kept: tick gap / late ticks, phase timings / max_busy / overruns, stale commits, stage-latency histogram, tick profile.
 - Expected (estimates), tick start -> staged: USB about 25.5 -> about 12-14 us mean (ssb about 15 -> about 7, 3 fewer timer reads); CW/digital lower again. Whole tick about 33 -> about 18-20 us. To check with the `{K}` profile in the same four cases.
 
+- 2026-11-12 bench after the tidy-up (USB TX and CW TX keyed fine; the earlier "not keying" was the test sequence, per the user):
+  - FT8 TX: tick start->staged 9.4/12.7 us mean/max (was 26.7/34.5); whole tick 9.9/13.2 (was 32.7/42); staged after alarm max 25 us; 0 stale.
+  - USB TX: start->staged 19.0/23.4 (was 25.5/42.5), ssb 9.6/10.7 (was 15.0/25), whole tick 19.5/23.9 (was 32.8/50); staged after alarm max 38 us; 0 stale.
+  - CW TX: start->staged 8.5/11.9; whole tick 9.0/12.4; max 28 us; 0 stale.
+  - Wake latency (about 11 us mean, 20 max) is now the largest item in the carrier modes.
+  - The slow ADC split step fell from about 230-330 us mean to 9-47 us. Its "wall time" was mostly dsp_task pre-empting it.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened
