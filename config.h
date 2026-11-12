@@ -874,7 +874,7 @@
 // Simulated (host_tests/digi_gaussian_sim/rtty_shaping.py, integrate-and-dump FSK detector):
 //   BT 2.0: 3.7 ms edges, about 0.1 dB, skirts -12 dB at +100 Hz / -17 dB at +200 Hz / -49 dB at +400 Hz vs hard
 //   BT 1.0: 7.5 ms edges, about 0.5 dB, -14 / -43 / -104 dB.   BT 0.7: about 1.0 dB.
-#define DIGI_BT_RTTY              0.0f
+#define DIGI_BT_RTTY              2.0f     // 2026-11-12 user: on air, no noticeable decode change, big sideband improvement
 
 // Worst-case timing diagnostics period, shared by diagnostics.cpp - one
 // sample period in microseconds.

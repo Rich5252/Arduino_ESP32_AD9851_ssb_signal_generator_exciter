@@ -6763,6 +6763,10 @@ User: disable the older diagnostics, keep only what the timing investigation nee
   - Wake latency (about 11 us mean, 20 max) is now the largest item in the carrier modes.
   - The slow ADC split step fell from about 230-330 us mean to 9-47 us. Its "wall time" was mostly dsp_task pre-empting it.
 
+- 2026-11-12 resolved: the earlier "USB and CW not keying" was the user's test harness. It needed the correct `{F...}` sent with the mode change. Not a firmware fault.
+
+- 2026-11-12 on-air result (user): RTTY with DIGI_BT_RTTY 2.0 shows no noticeable decode change and a big improvement in the sidebands. Default changed from 0.0 (Nano hard keying) to 2.0 in config.h.
+
 ## Where to resume
 
 The null-crossing bias itself is well-characterized and, per the "likely
