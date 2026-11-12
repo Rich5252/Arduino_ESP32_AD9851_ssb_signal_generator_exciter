@@ -29,5 +29,10 @@
 void module_link_init(void);                       // call once in setup(); no-op when MODULE_LINK_ENABLED 0
 void module_link_send_freq_khz(uint32_t carrier_hz);    // "{f<Hz rounded to kHz>}\r\n"
 void module_link_send_freq_exact(uint32_t carrier_hz);  // "{f<Hz>}\r\n" (Nano key-down form, for later)
+// 2026-11-12: ATU tune commands from the SDRuno plugin's ATU dialog, passed straight through to the modules the way
+// the Nano did (its Serial.print reached both the PC and the module line). `body` is what was inside the braces, e.g.
+// "+l" or "s"; this writes "{<body>}" with NO line ending, exactly as the Nano's echo. Only the ten commands the
+// Nano recognised are ever passed here (serial_commands.cpp). The modules never reply.
+void module_link_send_atu(const char *body);
 uint32_t module_link_sent_count(void);
 uint32_t module_link_dropped_count(void);

@@ -4874,6 +4874,37 @@ User: disable the older diagnostics, keep only what the timing investigation nee
 
 - 2026-11-12 on-air result (user): RTTY with DIGI_BT_RTTY 2.0 shows no noticeable decode change and a big improvement in the sidebands. Default changed from 0.0 (Nano hard keying) to 2.0 in config.h.
 
+### 2026-11-12 - Full cross-check of the Nano serial protocol against the ESP32 port: 3 gaps left
+
+Re-read TXlink4_Nano.ino ProcessSerialIn() and every protocol output (d3db0ad). Implemented and matching: inputs {B} {C} {D} {F} {H} {L} {M} {P} {Q} {R} {T} {U} {V} {W} {X} {Y} {Z} {J}; outputs {f<Hz>} (boot, {F}, {U}, key-down), {M}/{N}, {D}{N} on a trip, {F..}{R..}{S..}{T..} with the Nano's suppression rule (TXPowerOn || TXlevel != 0).
+Remaining (nothing done, awaiting the user):
+1. ATU pass-through/echo: the Nano echoes {+l} {-l} {+c} {-c} {i} {o} {s} {f} {?} {b} straight back with Serial.print, which on its shared UART reaches BOTH the PC and the ATU/filter modules. The ESP32 has a separate module link, so these would have to be sent to module_link (and echoed to USB if the plugin expects the ack). Today the ESP32's brace parser is case-sensitive, so each one falls through to "unknown brace command letter" - silently, since brace replies are muted. Risk: ATU tuning from the plugin does nothing with this firmware. Note {f} and {b} are lower case, so they do NOT collide with {F} and {B}.
+2. `{~TX}` at boot: the Nano prints it right after Serial.begin() (before anything else). Purpose unknown - probably an identify/handshake for the plugin. Not sent by the ESP32.
+3. TX temperature offset (TempTxOffset, TXlink4_Nano.ino around line 745): on the Nano, at the first TX reading after RX the offset LastRxTemp - TempAvgRaw is stored and added to every TX reading (cancelling the RF pickup on the NTC line); it is cleared on return to RX. TempDeg (corrected) drives the fan and the temperature trip, while {T} reports the RAW TempAvgRaw. The ESP32 uses the raw value for everything. Worth porting once the real PA and sensor wiring exist, so the reading does not jump at key-down.
+
+### 2026-11-12 - Read the SDRuno plugin (SDRunoPlugin_TXLink_Extended 6b4a178) and checked it against the ESP32's output
+
+Plugin receive parser: SDRunoPlugin_TXLinkFormSerial.cpp ProcessIncomingSerial(), called from a timer.
+- Everything OUTSIDE `{...}` is discarded, so the ESP32's plain-text diagnostics and boot text are safe.
+- It acts on a brace token by its FIRST letter (substr(0,1)): `~TX`, `M` mute both VRX, `N` unmute, `F`/`R`/`S` SWR captions, `T` temp caption, `D` force standby + red temp label. Everything else is ignored silently.
+- A brace token over 64 characters is discarded with a console message. 20 ms reading budget per tick, the rest deferred to the next one.
+- Plugin -> radio commands seen in the source: {B} {C} {D} {F} {H} {J} {L} {M} {P} {Q} {R} {T} {U} {V} {W} {X} {Y} {Z}, all implemented, plus the ATU set below.
+CORRECTION to the user's assumption: `{~TX}` IS used, and it is the init handshake. On `{~TX}` the plugin sends, in order: {F<current TX freq>}, frequency calibration, TX level, PA level, PA off (for safety), fan hold, fan low PWM, FT8 TX delay, temperature limit, and sets the TX mute default. Its own comment: "force a freq update here as it can be 20-30 seconds after DLL load before TXlink Arduino resets and sends ~TX". Without it the ESP32 keeps its own boot defaults until the user touches each control.
+ATU (SDRunoPlugin_TXLinkATUDialog.cpp): sends {+l} {-l} {+c} {-c} {b} {i} {o} {s} {f} {?}. The plugin parses NO reply to these, so the ESP32 only has to forward them to module_link - no USB echo needed.
+HAZARDS in the ESP32's current output, all only when diagnostics are unmuted (`v`), since brace replies are silent while muted:
+- Error replies quote the command letter inside braces: "-> {D} takes no argument", "-> {M} needs a mode number", and the same shape for {T} {H} {E} {L}. The plugin would read {D} as force-standby and {M} as mute-both-VRX. Fix: quote the letter without braces in those messages.
+- The 'P' preset dump prints lines starting `    { "Live", ...` - over 64 characters to the closing brace, so the plugin logs "message exceeded max length" and discards. Harmless, but noisy.
+Nothing else in the ESP32's output contains a brace except the real protocol fields ({A..} meter, {F}{R}{S}{T}, {M}/{N}, {D}{N}) and the boot help line, which is already gated on unmuted.
+No firmware change made yet; the user has the list.
+
+### 2026-11-12 - The three plugin-compatibility gaps closed (uncompiled for the ESP32)
+
+User asked for all three before the 300-400 W DC / 100 W RF PA is connected, to reduce surprises.
+1. `{~TX}` is now the last line of setup(), sent whether or not diagnostics are muted. The plugin answers with the whole starting configuration (frequency, calibration, {L}, {P}, {Q0}, {B}, {R}, {V}, {T}), so after a reset the plugin's settings win instead of the board's own boot defaults - worth remembering when the external PA is wired in, since the plugin deliberately sends {Q0} (external PA off) in that burst.
+2. ATU pass-through: `brace_try_atu()` in serial_commands.cpp runs before the normal switch and matches the ten exact strings {+l} {-l} {+c} {-c} {i} {o} {s} {f} {?} {b}, forwarding each to `module_link_send_atu()` as "{body}" with no line ending (the Nano's echo had none). Nothing is echoed to USB, because the plugin parses no reply. All lower case, so no collision with {F} or {B}. Host test host_tests/test_atu_match.c: 27 cases (the ten real ones plus look-alikes), 0 failed.
+3. Replies no longer contain brace characters: the argument-error messages for {U}/{D}, {M}, {T}, {H}, {E} and {L} now say "command X ..." instead of "{X} ...". The plugin acts on any brace token starting with M, N, F, R, S, T or D, so the old "-> {D} takes no argument" would have put it in standby and "-> {M} needs a mode number" would have muted the audio - only while unmuted, but a real hazard with a PA attached.
+Left alone, with the reasoning: the `P` preset dump still prints `    { "Live", ... },`. It exceeds the plugin's 64-character limit, so the plugin logs and discards it, and `P` can only arrive as a bare single key, which the plugin never sends.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

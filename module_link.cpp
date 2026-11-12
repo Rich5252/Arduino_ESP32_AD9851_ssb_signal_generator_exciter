@@ -51,6 +51,14 @@ void module_link_send_freq_khz(uint32_t carrier_hz)
     module_link_send_freq_exact(khz * 1000u);
 }
 
+void module_link_send_atu(const char *body)
+{
+    if (!body) return;
+    char buf[16];
+    int n = snprintf(buf, sizeof buf, "{%s}", body);     // no CR/LF: the Nano's echo had none
+    send_line(buf, n);
+}
+
 uint32_t module_link_sent_count(void) { return s_sent; }
 uint32_t module_link_dropped_count(void) { return s_dropped; }
 
@@ -59,6 +67,7 @@ uint32_t module_link_dropped_count(void) { return s_dropped; }
 void module_link_init(void) {}
 void module_link_send_freq_khz(uint32_t carrier_hz) { (void)carrier_hz; }
 void module_link_send_freq_exact(uint32_t carrier_hz) { (void)carrier_hz; }
+void module_link_send_atu(const char *body) { (void)body; }
 uint32_t module_link_sent_count(void) { return 0; }
 uint32_t module_link_dropped_count(void) { return 0; }
 

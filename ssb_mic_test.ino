@@ -1679,6 +1679,14 @@ void setup()
         Serial.printf("%d=%s%s", i, settingsPresets[i].name, i < preset_count - 1 ? ", " : "\r\n");
     }
     Serial.println("Send 'P' to print the current settings as a single pasteable preset line for settings.h.");
+
+    // 2026-11-12: the Nano's boot message (TXlink4_Nano.ino setup()), and the SDRuno plugin's init handshake: on
+    // "{~TX}" it sends the whole starting configuration (TX frequency, clock calibration, {L} level, {P} external PA
+    // level, {Q0} external PA off, {B} fan hold, {R} fan low PWM, {V} digital start delay, {T} temperature limit, and
+    // its own TX mute default) - SDRunoPlugin_TXLinkFormSerial.cpp, checked at plugin commit 6b4a178. Sent LAST, so
+    // the reply lands with everything initialised and loop() ready to read it, and sent whether or not diagnostics
+    // are muted, because it is protocol rather than a diagnostic.
+    Serial.print("{~TX}\r\n");
 }
 
 void loop()

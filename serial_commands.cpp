@@ -255,8 +255,29 @@ static void duty_override_write_and_reply(void)
 // The brace characters are reserved for this syntax (the freq_dev slew-limit keys that used to be '{' and '}' are
 // now '_' and '='). Replies deliberately contain no brace characters, so a plugin watching the port for {X..}
 // fields never mistakes a reply for data.
+// 2026-11-12: the ten ATU tune commands the SDRuno plugin's ATU dialog sends (SDRunoPlugin_TXLinkATUDialog.cpp).
+// The Nano echoed them with Serial.print, which on its shared UART reached both the PC and the ATU/filter modules;
+// here they go to the module link only, because the plugin parses no reply to them. Exact matches only, as the
+// Nano's strcmp chain - never arbitrary text. Lower case throughout, so {f} and {b} do not collide with {F} and {B}.
+static bool brace_try_atu(const brace_cmd_t *cmd)
+{
+    static const char *const k_atu[] = { "+l", "-l", "+c", "-c", "i", "o", "s", "f", "?", "b" };
+    char body[4];
+    if (strlen(cmd->arg) > 1) return false;        // longest ATU body is 2 characters ("+l"), so body[4] always fits
+    body[0] = cmd->letter;
+    strcpy(&body[1], cmd->arg);
+    for (unsigned i = 0; i < sizeof k_atu / sizeof k_atu[0]; i++) {
+        if (strcmp(body, k_atu[i]) != 0) continue;
+        module_link_send_atu(body);
+        serial_reply("-> ATU command %s passed to the modules\r\n", body);
+        return true;
+    }
+    return false;
+}
+
 static void brace_run_command(const brace_cmd_t *cmd)
 {
+    if (brace_try_atu(cmd)) return;
     switch (cmd->letter) {
         case 'F': {
 #if AD9851_ATTACHED
@@ -387,7 +408,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
             // voice modes also need the mic PTT, CW the key, digital modes key on {U} alone. TXout is held off while
             // {L} is negative. An argument is refused so a garbled command cannot key the transmitter.
             if (cmd->arg[0] != 0) {
-                serial_reply("-> {%c} takes no argument - ignored, TXout stays %s. Received argument '%s'\r\n",
+                serial_reply("-> command %c takes no argument - ignored, TXout stays %s. Received argument '%s'\r\n",
                               cmd->letter, tx_out_get() ? "ON" : "OFF", cmd->arg);
                 break;
             }
@@ -412,7 +433,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
             int i = 0, val = 0;
             while (a[i] >= '0' && a[i] <= '9' && i < 5) { val = val * 10 + (a[i] - '0'); i++; }
             if (i == 0 || i > 4 || a[i] != 0) {
-                serial_reply("-> {M} needs a mode number (32 USB, 64 LSB, 128 Tune; Nano 1/2/4/8/16). Received '%s' - "
+                serial_reply("-> command M needs a mode number (32 USB, 64 LSB, 128 Tune; Nano 1/2/4/8/16). Received '%s' - "
                               "mode unchanged (%d %s)\r\n", a, tx_mode_get(), tx_mode_name(tx_mode_get()));
                 break;
             }
@@ -439,7 +460,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
             int i = 0, val = 0;
             while (a[i] >= '0' && a[i] <= '9' && i < 4) { val = val * 10 + (a[i] - '0'); i++; }
             if (i == 0 || i > 3 || a[i] != 0) {
-                serial_reply("-> {T} needs whole degrees C (0-150). Received '%s' - limit unchanged at %d degC\r\n",
+                serial_reply("-> command T needs whole degrees C (0-150). Received '%s' - limit unchanged at %d degC\r\n",
                               a, tx_temp_max_get());
                 break;
             }
@@ -509,7 +530,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
             int i = 0, val = 0;
             while (a[i] >= '0' && a[i] <= '9' && i < 5) { val = val * 10 + (a[i] - '0'); i++; }
             if (i == 0 || i > 4 || a[i] != 0) {
-                serial_reply("-> {H} needs a whole number of ms (0-5000). Received '%s' - hold unchanged at %d ms\r\n",
+                serial_reply("-> command H needs a whole number of ms (0-5000). Received '%s' - hold unchanged at %d ms\r\n",
                               a, tx_hold_get_ms());
                 break;
             }
@@ -523,7 +544,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
             char *end = nullptr;
             float v = strtof(a, &end);
             if (a[0] == 0 || end == a || *end != 0 || !(v >= 0.0f) || v > 1000.0f) {
-                serial_reply("-> {E} needs a time in ms (0.5-20, e.g. 5 or 2.5). Received '%s' - edge unchanged at %.1f ms\r\n",
+                serial_reply("-> command E needs a time in ms (0.5-20, e.g. 5 or 2.5). Received '%s' - edge unchanged at %.1f ms\r\n",
                               a, tx_edge_get_ms());
                 break;
             }
@@ -541,7 +562,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
             if (a[i] == '-' || a[i] == '+') { if (a[i] == '-') sign = -1; i++; }
             while (a[i] >= '0' && a[i] <= '9' && nd < 5) { val = val * 10 + (a[i] - '0'); i++; nd++; }
             if (nd == 0 || nd > 4 || a[i] != 0) {
-                serial_reply("-> {L} needs a whole number, -100..100 (%% of envelope voltage). Received '%s' - level "
+                serial_reply("-> command L needs a whole number, -100..100 (%% of envelope voltage). Received '%s' - level "
                               "unchanged at L%d\r\n", a, tx_level_get());
                 break;
             }
