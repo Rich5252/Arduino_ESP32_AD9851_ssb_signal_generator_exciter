@@ -4905,6 +4905,25 @@ User asked for all three before the 300-400 W DC / 100 W RF PA is connected, to 
 3. Replies no longer contain brace characters: the argument-error messages for {U}/{D}, {M}, {T}, {H}, {E} and {L} now say "command X ..." instead of "{X} ...". The plugin acts on any brace token starting with M, N, F, R, S, T or D, so the old "-> {D} takes no argument" would have put it in standby and "-> {M} needs a mode number" would have muted the audio - only while unmuted, but a real hazard with a PA attached.
 Left alone, with the reasoning: the `P` preset dump still prints `    { "Live", ... },`. It exceeds the plugin's 64-character limit, so the plugin logs and discards it, and `P` can only arrive as a bare single key, which the plugin never sends.
 
+### 2026-11-13 - Which settings still affect CW and the digital modes after CARRIER_MODES_SKIP_DSP
+
+User asked whether CW on preset 9 runs the "s" single-tone source, and whether the single-key commands still respond. Checked in the code:
+- Preset 9 ("Micr Voice 20k") selects AUDIO_SRC_MIC, not a test tone. Since 2026-11-12 the audio source does not matter in CW or the digital modes at all: ssb_dsp_process_sample() and the envelope chain are both skipped and the carrier is built directly (envelope = 1.0, freq offset from tx_carrier_freq_dev_hz()). The mic ADC is still read, so `#` and the level meter still show the raw sample, before mic gain.
+- Still live in a carrier mode (everything after the override): tx_level_apply ({L}, {E} edges, {H} hold), PWM offset/scale (u/j/i/k) or predistortion, the 0..1 clamp, relative delay (applied but with a constant envelope and frequency it has no visible effect), carrier_output_compute_tx_freq ({F}, {C}), and the AD9851 RF enable ('o', which is in the preset).
+- Dead in a carrier mode, but still accepted and stored, and live again on the next voice mode: mic gain (+/-), master gain, audio EQ, compressor, envelope floor, gdeq, ampeq, ALC, soft limit, freq-dev slew, squelch, ADC LPF mode, sideband, the audio-source keys.
+- Still unverified (noted 2026-11-12): the skipped filters hold their state while a carrier mode is selected, so the first voice TX after CW or a digital mode could show a transient.
+
+### 2026-11-13 - Future idea (not started): local driver-output RF voltage sense
+
+Resolved first: the mic meter reading -99 in CW was the user having selected the 's' single-tone source after loading preset 9. With AUDIO_SRC_SINGLETONE the mic branch is not taken, so instrumentation_record_adc() is never called and the ADC meter floors - as the code says. On plain preset 9 (mic) it reads the mic input in CW as expected. No fault, no change.
+Also settled: a dBW output is better derived from the FWD watts in the plugin GUI than inferred in firmware.
+The user's own suggestion for later: measure the RF voltage at THIS module's output (the 2 W driver) to estimate driver output power. SWR is currently measured externally at the main PA, whose detectors feed the existing FWD/REV channels. Notes for whenever it is picked up:
+- Pin: GPIO17 or GPIO18, both ADC2 and both spare (ESP32_hardware.h). slow_adc already has a channel table, so a fourth channel is a small change. GPIO8 is ADC1 and unusable - ADC1 runs continuous for the mic.
+- Levels: 2 W into 50 ohm is 10 V rms, 14.1 V peak, so about a 5:1 divider to stay under the ADC's ~3.1 V ceiling. The diode knee will dominate the bottom of the range, as it already does on the Nano REV curve (its linearisation below 100 counts).
+- Calibration opportunity: in the carrier modes the envelope is constant, so a 250 ms average is directly comparable with the commanded {L}. Stepping {L} in CW would build a level -> volts curve in one sitting, and would also re-check {L} linearity independently (measured linear on the bench 2026-11-10).
+- For voice a peak-hold detector (about 50-100 ms time constant) would give driver PEP; the slow average alone depends on the modulation.
+- Possibly the most valuable use is not power at all but an interlock: an independent "RF actually present" signal. With TXout on it catches a dead driver, a bias failure or a DDS that stopped; with TXout off it catches RF present when it should not be. That is a genuine safety check once the 300-400 W DC / 100 W RF PA is connected, and it needs no calibration to be useful.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened
