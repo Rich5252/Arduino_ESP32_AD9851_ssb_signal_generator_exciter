@@ -6817,6 +6817,19 @@ The user's own suggestion for later: measure the RF voltage at THIS module's out
 - For voice a peak-hold detector (about 50-100 ms time constant) would give driver PEP; the slow average alone depends on the modulation.
 - Possibly the most valuable use is not power at all but an interlock: an independent "RF actually present" signal. With TXout on it catches a dead driver, a bias failure or a DDS that stopped; with TXout off it catches RF present when it should not be. That is a genuine safety check once the 300-400 W DC / 100 W RF PA is connected, and it needs no calibration to be useful.
 
+### 2026-11-13 - Checked ExtPAout (external PA PTT) on TX with {Q1}: correct, two Nano traps worth knowing
+
+User asked for a double check before connecting the PA. Code is right and faithful to the Nano:
+- tx_control.cpp line ~282: `write_extpaout(s_state != TX_SEQ_RX && s_local_pa && s_extpa_on)`, evaluated every 50 us tick, so {Q1}/{Q0} during TX take effect at once. write_extpaout() uses gpio_set_level(), and the pin is made an output by force_safe_outputs() at the top of setup() with the same IDF calls as TXout, so there is no Arduino pinMode problem.
+- Timing: ExtPAout rises with TXout on the RX -> KEYING transition, so it leads RF by the 5 ms relay delay plus the Gaussian edge; both drop together after the {H} hold. Reported by {K} as "ExtPAout on/off".
+- Nano check (TXlink4_Nano.ino 599-606): `if (LocalPAactive) { digitalWrite(TXout, HIGH); if (ExtPAon) digitalWrite(ExtPAout, HIGH); ... }` - so the Nano also nests ExtPAout inside LocalPAactive. The port matches.
+TRAPS (both inherited from the Nano, neither a port fault):
+1. A NEGATIVE {L} (local PA disabled, Nano's diagnostic mode) also blocks ExtPAout. So "{L-50} with {Q1}" does NOT key the external PA. If driving the big PA with the local 2 W stage unpowered is wanted, that needs a deliberate change to the rule.
+2. {Q1} switches the RF drive level from {L} to {P} (Nano setDDSlevelPWM(): level = ExtPAon ? ExtPAlevel : TXlevel). The user's bench {K} dumps all showed P0, so enabling {Q1} with P0 gives zero drive. {P} must be set before {Q1} is useful.
+Stale comment in ESP32_hardware.h ("pin set, not yet driven by TX code") corrected the same day.
+
+- 2026-11-13 evening: the ExtPAout symptom that prompted the check above was a corroded pin in the hardware, now fixed; everything functional. So no firmware fault - but the two Nano traps recorded above (a negative {L} blocks ExtPAout, and {Q1} takes the drive level from {P}, which was P0 on the bench) still stand.
+
 ## Where to resume
 
 The null-crossing bias itself is well-characterized and, per the "likely

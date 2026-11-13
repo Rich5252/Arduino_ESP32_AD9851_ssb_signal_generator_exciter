@@ -32,9 +32,10 @@
  *             (tx_control.cpp). Driven low first thing in setup(); 10k pull-down fitted. Moved from GPIO40 2026-11-11:
  *             40 was driven HIGH during a USB flash even with TX off and the pull-down fitted; 45/46 scoped: stay low.
  *             Strapping pin (VDD_SPI select) - must never be pulled high at reset.
- *   GPIO 46   ExtPAout (Nano name): external (remote) PA PTT, active high (Nano D4) - pin set, not yet driven by TX
- *             code (held low by force_safe_outputs()). Moved from 41 2026-11-11 with TXout. Strapping pin (boot
- *             mode / ROM log): pull-down only, never pulled high at reset.
+ *   GPIO 46   ExtPAout (Nano name): external (remote) PA PTT, active high (Nano D4), {Q0}/{Q1} - driven with TXout
+ *             during TX by tx_control.cpp, and only while {L} is positive (the Nano nests ExtPAout inside
+ *             LocalPAactive). Low at boot and on reboot via force_safe_outputs(). Moved from 41 2026-11-11 with
+ *             TXout. Strapping pin (boot mode / ROM log): pull-down only, never pulled high at reset.
  *   GPIO 39   chirp-mode square-wave reference; also the (off by default) ADC-ISR and command-window debug marker
  *   GPIO 43   header TX: UART0 TX to the filter/ATU modules, "{f<Hz>}" at 115200 (module_link.cpp). Also carries the
  *             chip's ROM/bootloader text at reset. Driver: one 2N7000/BSS138 (gate from GPIO43, ~100k gate-GND,
