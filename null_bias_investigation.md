@@ -6830,6 +6830,15 @@ Stale comment in ESP32_hardware.h ("pin set, not yet driven by TX code") correct
 
 - 2026-11-13 evening: the ExtPAout symptom that prompted the check above was a corroded pin in the hardware, now fixed; everything functional. So no firmware fault - but the two Nano traps recorded above (a negative {L} blocks ExtPAout, and {Q1} takes the drive level from {P}, which was P0 on the bench) still stand.
 
+### 2026-11-14 - MILESTONE: on air. FT8 QSOs through the ESP32 exciter driving the PA
+
+User report after RF hardware and SDR plugin tweaks: the exciter is driving the PA successfully and several FT8 QSOs are in the log, so the plugin link (including the baud rate) is working. SWR and temperature readings are "working well enough for now"; a calibration project is deferred. His own summary: lessons from the Nano build have produced a much cleaner RF solution this time.
+What the QSOs do and do not demonstrate:
+- Proven end to end: the brace protocol both ways, {~TX} init, mode selection, the TX sequencer and relay timing, the {V} start delay, AdjustStart, the 20 kHz per-tick GFSK symbol generation and its timing against the crystal, the carrier-mode DSP skip, the level and RF edges, and the PA keying - a decode at the far end requires the whole chain to be right.
+- NOT yet demonstrated: the skirt improvement itself. The 30 dB (FT8) figure is from simulation and from the generator's own output on a host build; it needs a look at the transmitted spectrum on the SDR to confirm on air. A decode only proves the waveform is well formed, not that it is clean.
+- Still uncalibrated: the SWR and temperature trips run on the Nano's curves with the placeholder FWD scale (1.855) and REV scale (1.0). Both scales feed the computed SWR, so the trip point (3.0) is uncertain in absolute terms until the detectors are calibrated against the real coupler. The trips are live and will fire; where exactly they fire is the open part.
+UI work is being done by the user in a separate thread (no firmware implications known here).
+
 ## Where to resume
 
 The null-crossing bias itself is well-characterized and, per the "likely
