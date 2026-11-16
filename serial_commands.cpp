@@ -572,6 +572,25 @@ static void brace_run_command(const brace_cmd_t *cmd)
                           tx_local_pa_active() ? "active" : "OFF (diagnostic mode)", tx_out_get() ? "ON" : "OFF");
             break;
         }
+        case '#': {
+            // 2026-11-16 {#0}/{#1}/{#2}: the level-meter source, the same three states the single-key '#' cycles -
+            // 0 off, 1 RF envelope, 2 ADC output (instrumentation.h). {#} alone reports. Letter chosen to match the
+            // single-key command; the TXlink protocol does not use '#'. The reply contains no {X..} field.
+            if (cmd->arg[0] == 0) {
+                serial_reply("-> level meter (field A): %s\r\n", instrumentation_mode_name(instrumentation_get_mode()));
+                break;
+            }
+            if (cmd->arg[0] >= '0' && cmd->arg[0] <= '2' && cmd->arg[1] == 0) {
+                const char *name = instrumentation_set_mode(cmd->arg[0] - '0');
+                serial_reply("-> level meter (field A): %s%s\r\n", name,
+                              instrumentation_get_mode() == INSTR_OFF ? "" : " - one line every 250ms");
+            } else {
+                serial_reply("-> # needs 0 (off), 1 (RF envelope) or 2 (ADC output). Received '%s' - meter stays "
+                              "%s\r\n", cmd->arg, instrumentation_mode_name(instrumentation_get_mode()));
+            }
+            break;
+        }
+
         // ---- 2026-11-11 TXlink Nano digital-mode commands (digi_gen.h), Nano semantics: atoi() of the argument ----
         case 'V': digi_cmd_V(atol(cmd->arg)); serial_reply("-> digital TX start delay %ld ms\r\n", atol(cmd->arg)); break;
         case 'W': digi_cmd_W(atol(cmd->arg)); serial_reply("-> %ld ms left in the period\r\n", atol(cmd->arg)); break;
@@ -596,7 +615,7 @@ static void brace_run_command(const brace_cmd_t *cmd)
         }
         default:
             serial_reply("-> unknown brace command letter '%c' (known: F = carrier frequency in Hz, C = clock calibration in ppb, "
-                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms, T = PA temp limit degC, Q/P = external PA on/level, R/B = fan low PWM / hold min, V W X Y Z J = digital modes)\r\n", cmd->letter);
+                          "K = slow ADC status, K0 K1 report off/on, K2 K3 reads pause/run, U/D = TX on/off, M = mode, L = level %%, H = CW hold ms, E = RF edge ms, T = PA temp limit degC, Q/P = external PA on/level, R/B = fan low PWM / hold min, V W X Y Z J = digital modes, # = level meter source)\r\n", cmd->letter);
             break;
     }
 }

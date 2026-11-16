@@ -51,6 +51,10 @@ void instrumentation_service(void);
 int instrumentation_get_mode(void);                 // INSTR_OFF / INSTR_RF / INSTR_ADC
 const char* instrumentation_mode_name(int mode);
 const char* instrumentation_cycle_mode(void);       // advance to the next mode, returns its name
+// 2026-11-16 {#0}/{#1}/{#2}: select the meter source directly instead of cycling. Same effect as landing on that
+// mode with '#', including re-arming the meter so the first message is current. Out of range: no change.
+// Returns the (possibly unchanged) mode's name.
+const char* instrumentation_set_mode(int mode);
 
 // Formats "{A-12.3}" (no line ending) into buf (needs >= 9 bytes). Exposed so the format can be host-tested.
 void instrumentation_format_level(char *buf, unsigned buf_len, float level_db);

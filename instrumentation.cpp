@@ -80,7 +80,13 @@ const char* instrumentation_mode_name(int mode)
 
 const char* instrumentation_cycle_mode(void)
 {
-    int next = (s_mode + 1) % 3;                   // OFF -> RF -> ADC -> OFF
+    return instrumentation_set_mode((s_mode + 1) % 3);   // OFF -> RF -> ADC -> OFF
+}
+
+// 2026-11-16 {#n}: the same thing with the mode given rather than stepped - see instrumentation.h.
+const char* instrumentation_set_mode(int next)
+{
+    if (next < INSTR_OFF || next > INSTR_ADC) return instrumentation_mode_name(s_mode);
     // Re-arm the meter being switched to: discard any stale peak/sample count, so the first message is current.
     meter_t *m = (next == INSTR_RF) ? &s_rf_meter : (next == INSTR_ADC) ? &s_adc_meter : nullptr;
     if (m) {

@@ -6839,6 +6839,11 @@ What the QSOs do and do not demonstrate:
 - Still uncalibrated: the SWR and temperature trips run on the Nano's curves with the placeholder FWD scale (1.855) and REV scale (1.0). Both scales feed the computed SWR, so the trip point (3.0) is uncertain in absolute terms until the detectors are calibrated against the real coupler. The trips are live and will fire; where exactly they fire is the open part.
 UI work is being done by the user in a separate thread (no firmware implications known here).
 
+### 2026-11-16 - {#0}/{#1}/{#2} added: level-meter source selectable from the plugin (uncompiled)
+
+User request. `instrumentation_set_mode(int)` added to instrumentation.h/.cpp as the primitive (range-checked; out of range leaves the mode alone and returns the current name), and `instrumentation_cycle_mode()` now just calls it with (mode + 1) % 3 - so the single-key '#' and the new brace command share one code path, including the meter re-arm that stops the first message being a stale peak. New brace case '#' in serial_commands.cpp: 0 off, 1 RF envelope, 2 ADC output, with a bare `{#}` reporting. '#' is free in the TXlink protocol and the replies contain no brace fields, so the plugin ignores them.
+Note for the plugin side: field `{A..}` is the same field whichever source is selected, so a GUI showing "mic level" and "RF level" from it has to track which source is active - hence this command. The RF envelope tap is before tx_level_apply, so it reads modulation depth and does not follow {L} (discussed 2026-11-13).
+
 ## Where to resume
 
 The null-crossing bias itself is well-characterized and, per the "likely
