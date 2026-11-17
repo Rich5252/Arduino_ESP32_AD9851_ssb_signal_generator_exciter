@@ -4951,6 +4951,40 @@ UI work is being done by the user in a separate thread (no firmware implications
 User request. `instrumentation_set_mode(int)` added to instrumentation.h/.cpp as the primitive (range-checked; out of range leaves the mode alone and returns the current name), and `instrumentation_cycle_mode()` now just calls it with (mode + 1) % 3 - so the single-key '#' and the new brace command share one code path, including the meter re-arm that stops the first message being a stale peak. New brace case '#' in serial_commands.cpp: 0 off, 1 RF envelope, 2 ADC output, with a bare `{#}` reporting. '#' is free in the TXlink protocol and the replies contain no brace fields, so the plugin ignores them.
 Note for the plugin side: field `{A..}` is the same field whichever source is selected, so a GUI showing "mic level" and "RF level" from it has to track which source is active - hence this command. The RF envelope tap is before tx_level_apply, so it reads modulation depth and does not follow {L} (discussed 2026-11-13).
 
+### 2026-11-17 - Review: why the slow-ADC readings bounce, and whether the rate can safely go up
+
+User: the FWD/REV/TEMP readings bounce around; can the read rate and the averaging be increased?
+Cause found by reading the code, not measured:
+- config.h has SLOW_ADC_BURST_PERIOD_MS 125 and SLOW_ADC_AVG_BURSTS 2. In split mode the task takes ONE channel per wake, so period = 125/3 = 41 ms and steps_per_avg = 3 x 2 = 6. A published average is therefore 6 wakes x 41 ms = 246 ms containing exactly TWO samples per channel, 123 ms apart.
+- Two samples is as little averaging as the Nano required (">= 2 samples/s per channel"), so the scatter is expected: the random part only falls as sqrt(N).
+- Worse for a mains-powered PA: 123 ms is 12.3 cycles of 100 Hz, so the two samples land at essentially unrelated mains phases and the pair rejects supply ripple not at all. The result will wander as the phase relationship drifts, which matches "bounces around" better than white noise alone would.
+Why the old numbers were chosen, and why that no longer applies: they date from 2026-11-04, when the IDF driver read held rtc_spinlock with interrupts masked for 260-450 us and cost one late tick plus one stale commit per read. The split register-level read removed that, and the 2026-11-12 tick tidy-up dropped the measured step time from 230-330 us mean (mostly dsp_task pre-emption, not ADC work) to 9-47 us. Core 0 now runs the dsp tick in 9.9 us mean (FT8) to 19.5 us (USB) of every 50 us, so 60-80 % is idle.
+Proposed (NOT applied, awaiting the user) - window = AVG_BURSTS x BURST_PERIOD_MS:
+- Option A: BURST_PERIOD_MS 6, AVG_BURSTS 40 -> 2 ms per wake, 40 samples per channel, window exactly 240 ms. Scatter down by sqrt(40/2) = 4.5x. Cost about 1-2.5 % of core 0.
+- Option B: BURST_PERIOD_MS 3, AVG_BURSTS 80 -> 1 ms per wake, 80 samples, same 240 ms. 6.3x. Cost about 2-5 %.
+- 240 ms is deliberate: 12 whole cycles of 50 Hz and 24 of 100 Hz, and with uniform sampling an integer number of cycles sums to zero, so mains ripple is rejected rather than aliased. The present 246 ms window is not a multiple of either.
+- BURST_PERIOD_MS must stay a multiple of 3 (SLOW_ADC_NCH), since the code divides before converting to ticks; the FreeRTOS tick is 1 ms, so 3 ms is the practical floor.
+- The report line stays at INSTRUMENTATION_PERIOD_MS 250, so an average is occasionally repeated or skipped. That is already true today (246 vs 250) and does not matter for a meter.
+To check after any change: {K} for split step time mean/max, late ticks and stale commits at 0, s_burst_late at 0; and re-run the {K2}/{K3} A/B on the SDR spectrum, since the original 2026-11-04 noise complaint was about ADC2 activity and this raises it about 20x.
+
+- 2026-11-17, applied at the user's request: option A. `SLOW_ADC_BURST_PERIOD_MS` 125 -> 6 and `SLOW_ADC_AVG_BURSTS` 2 -> 40, so a wake every 2 ms, 40 samples per channel, 240 ms window (500 reads/s total against 24). Uncompiled for the ESP32. The boot `[slowadc] running:` line prints both values, so it will confirm the new rate. To check: {K} split step time mean/max (was 9-47 us), late ticks and stale commits at 0, s_burst_late at 0 (`late` in the {K} line), and the {K2}/{K3} spectrum A/B.
+
+- 2026-11-17, bench: the 6/40 change is running and the readings are "much better" per the user. The {K} checks (step time, late ticks, stale commits, s_burst_late) and the {K2}/{K3} spectrum A/B are still to do.
+
+- 2026-11-17, measured by the user at 100 W: forward-power scatter went from about +/-20 W to about +/-5 W, i.e. 4x, against the predicted 4.5x from sqrt(40/2). The close agreement with the sqrt(N) law says the scatter was essentially random and uncorrelated sample to sample; had mains ripple dominated, the 240 ms whole-cycle window should have beaten 4.5x rather than matched it. So the averaging did the work and the mains alignment was belt and braces. Practical consequence: further gains are expensive - 3/80 would give only another sqrt(2) (about +/-3.5 W), as would doubling the window. Better than that needs a quieter detector rather than more averaging. The user considers +/-5 W plenty good enough.
+
+### 2026-11-17 - {K} after the 6/40 slow-ADC change: clean, and the staging margin is if anything better
+
+USB TX, L0, 32.1 s window:
+- 35063 reads per channel, 0 errors. late (s_burst_late) 0. Late ticks 0/s, stale commits 0/s.
+- Staged after alarm: max 44 us, and of 642781 ticks exactly ONE was in the 40-45 band, none above. On 2026-11-12 the same mode gave max 53 us with 5 ticks in 50-60. So raising the ADC rate twentyfold did not cost staging margin; it looks slightly better, probably because the task now takes many short wakes instead of occasional longer ones.
+- Tick profile unchanged: whole tick 19.5 mean (was 19.5), max 34.5 (was 23.9 - the maxima sit in the cheap sections, the pre-emption artefact noted on 11-12).
+- Split step time rose to mean 46.7 / max 51 us, from means of 9-47 before. Expected and not a problem: it is WALL time, and a step of its own ~25 us of work now almost always has one 19.5 us dsp tick land inside it, which also explains the unusually tight spread. True ADC cost is about 25 us x 500/s = 1.25 % of core 0, in line with the 1-2.5 % estimate.
+Worth watching at calibration time: in this capture REV read 34.0 mV against FWD 23.7 mV, i.e. reflected above forward, giving a meaningless "SWR 2.7" at 0.2 W. Earlier captures had REV at 0.0 mV, so this appeared with the PA hardware connected - detector offset or pickup rather than real reflected power at that level. No trip risk as it stands, because the SWR rules need fwd >= SWR_TRIP_FWD_MIN_W (1 W); but the REV_GE_FWD rule would fire immediately on this relationship once real power is present, so the REV offset wants checking before relying on the trip.
+
+- 2026-11-17, user's explanation of the REV offset flagged above: DC offsets between the SWR bridge and the ESP32, which sit in different boxes linked by modules and coax. He saw the same on the Nano. It therefore only matters at low power: at 100 W the detector output is volts and tens of mV of offset is a rounding error, and his readings there agree with his NanoVNA. That also answers the trip worry - REV_GE_FWD needs fwd >= 1 W, by which point the offset is negligible, so there is no nuisance-trip path. A full calibration is deferred; "OK for now".
+  - Idea for the calibration project, not implemented: a REV/FWD zero reference captured automatically while TX has been off for a few seconds (tx_report_idle() already marks exactly that state) and subtracted from the averages. It would clean up the low-power readings and the displayed SWR at idle. Needs a guard so a real reading can never be latched as the zero.
+
 ## Open items carried from earlier sessions, still unresolved
 
 - `MAX_FREQ_DEV_HZ` currently `20000.0f` (config.h:405) - a widened

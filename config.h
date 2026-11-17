@@ -793,10 +793,25 @@
 #define SLOW_ADC_DUMMY_FWD_MV     300.0f
 #define SLOW_ADC_DUMMY_REV_MV     60.0f
 #define SLOW_ADC_DUMMY_TEMP_MV    1701.0f
-// Read all three channels back to back every BURST_PERIOD, average AVG_BURSTS bursts (125 ms x 2 = 250 ms = one
-// report). 8 bursts/s = 24 reads/s; the Nano requirement is >= 2 samples/s per channel.
-#define SLOW_ADC_BURST_PERIOD_MS  125
-#define SLOW_ADC_AVG_BURSTS       2
+// One channel per wake in split mode (READ_MODE 1), so the task wakes every BURST_PERIOD/3 ms and publishes an
+// average after AVG_BURSTS x 3 wakes: the window is AVG_BURSTS x BURST_PERIOD ms and each channel contributes
+// AVG_BURSTS samples to it.
+//
+// 2026-11-17: was 125 / 2 - a 246 ms window holding just TWO samples per channel, 123 ms apart, which is the Nano's
+// bare minimum (">= 2 samples/s per channel") and why the readings scattered. Two samples barely average at all,
+// and 123 ms is 12.3 cycles of 100 Hz, so the pair rejected mains ripple not at all and wandered with its phase.
+// Now 6 / 40: a wake every 2 ms, 40 samples per channel, random scatter down by sqrt(40/2) = 4.5x. The 240 ms
+// window is deliberate - exactly 12 cycles of 50 Hz and 24 of 100 Hz, and uniform sampling over a whole number of
+// cycles sums ripple to zero rather than aliasing it. Costs about 1-2.5 % of core 0 (step time 9-47 us measured
+// 2026-11-12, dsp_task uses 10-20 us of each 50 us tick), against the 260-450 us interrupt-masked driver read that
+// set the original slow rate and was replaced by the split read on 2026-11-04.
+//
+// BURST_PERIOD_MS must stay a multiple of SLOW_ADC_NCH (3): the code divides before converting to FreeRTOS ticks.
+// The tick is 1 ms, so 3 is the floor; 3 / 80 would give 80 samples per channel (6.3x) for about 2-5 % of core 0.
+// The report line stays on INSTRUMENTATION_PERIOD_MS (250), so an average is occasionally repeated or skipped -
+// already true of the old 246 ms window, and of no consequence for a meter.
+#define SLOW_ADC_BURST_PERIOD_MS  6
+#define SLOW_ADC_AVG_BURSTS       40
 // Core for the reading task. A real ADC2 read masks interrupts on its own core for the conversion (IDF source,
 // see slow_adc.h): core 1 = delays the gptimer/ADC ISRs, core 0 = delays dsp_task. Pick by A/B test.
 #define SLOW_ADC_TASK_CORE        0
