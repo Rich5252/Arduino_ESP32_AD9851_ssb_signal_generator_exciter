@@ -1,6 +1,7 @@
 # SSB prime mover for ham radio SDR transceiver.
 
 <img width="510" height="287" alt="SSB_Exciter_G4AHN 1" src="https://github.com/user-attachments/assets/2982b9aa-a960-415a-913b-b35839123f89" />
+<img width="1224" height="689" alt="image" src="https://github.com/user-attachments/assets/314d8428-0574-477a-9eae-5909d1aa02a9" />
 
 
 This project was developed to add SSB to my SDR transceiver system. The 
